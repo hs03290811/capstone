@@ -1,0 +1,29 @@
+// recommended_course.json
+{
+  "status": "success",
+  "message": "코스 추천이 성공적으로 완료되었습니다.",
+  "data": {
+    "totalDistanceKm": 4.8,
+    "estimatedTimeMinutes": 35,
+    "courseName": "남산 순환 가상 코스",
+    "coursePath": {
+      "type": "FeatureCollection",
+      "features": [
+        {
+          "type": "Feature",
+          "properties": {},
+          "geometry": {
+            "type": "LineString",
+            "coordinates": [
+              [127.00000, 37.50000],
+              [127.00150, 37.50200],
+              [127.00300, 37.50100],
+              [127.00450, 37.50300],
+              [127.00600, 37.50400]
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
