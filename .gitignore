@@ -1,28 +1,46 @@
-Python 가상 환경
+.bundle/
 
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+yarn.lock
+.expo/
+
+# Android
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/build/
+android/local.properties
+android/.kotlin/
+
+#ios
+
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+.env.*
+*.keystore
+*.jks
+keystore.properties
+
+#Python 가상 환경
 venv/
 *.venv/
 
-Python 캐시 파일 
-
+#Python 캐시 파일
 pycache/
 *.pyc
 
-Mac 시스템 파일
-
-.DS_Store
-
-IDE 설정
-
-.idea/
-.vscode/
-
-
-1. AWS 접속 키
-
+#1. AWS 접속 키
 *.pem
-
-2. 4700만 줄짜리 원본 데이터
-
+#2. 4700만 줄짜리 원본 데이터
 *.gpkg
-.env
