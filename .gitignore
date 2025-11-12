@@ -1,0 +1,15 @@
+# 1. 비밀번호 및 키 파일
+.env
+*.pem
+
+# 2. Python 가상 환경 (용량이 매우 큼)
+venv/
+
+# 3. Python 캐시 파일
+__pycache__/
+*.pyc
+
+# 4. 데이터 파일 (코드가 아님)
+*.gpkg
+*.geojson
+seoul_boundary_data/
