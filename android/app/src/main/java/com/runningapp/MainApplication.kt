@@ -1,4 +1,4 @@
-package com.fe2project
+package com.runningapp
 
 import android.app.Application
 import com.facebook.react.PackageList
