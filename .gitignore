@@ -17,7 +17,7 @@ android/local.properties
 android/.kotlin/
 
 #ios
-
+ios/
 
 # IDE & OS
 .vscode/
