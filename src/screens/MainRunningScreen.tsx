@@ -8,6 +8,7 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ToastAndroid,        // 🔹 추가: 위치 권한 안내용
 } from 'react-native';
 import MapView, { Polyline, type Region } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -28,6 +29,14 @@ type LineStringFeature = {
   geometry?: { type?: string; coordinates?: [number, number][] };
 };
 type Course = { features?: LineStringFeature[] };
+
+// 🔹 voice_triggers 타입 (예시: { distance_km: number; message: string })
+type VoiceTrigger = {
+  distance_km?: number;
+  distance?: number;    // 혹시 다른 키로 올 수도 있어 여분으로 둠
+  message?: string;
+  text?: string;
+};
 
 const VOICE_LANG = Config.TTS_VOICE || 'ko-KR';
 
@@ -58,13 +67,15 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     startRunning,
     stopRunning,
     recommendedCourse,
-    updateUserLocation, // ← FE1에서 합의한 인터페이스: 위치 업데이트 전달
+    updateUserLocation,     // 위치 전달
+    voiceTriggers,          // 🔹 파스2: 음성 안내 트리거
   } = useRunning();
 
   // ▼ MapView/Geo watch 핸들 보관
   const mapRef = useRef<MapView | null>(null);
   const watchIdRef = useRef<number | null>(null);
-  const hasAnnouncedRef = useRef<boolean>(false); // 첫 렌더/마운트시 TTS 중복 방지용
+  const hasAnnouncedRef = useRef<boolean>(false);     // 처음 마운트시 TTS 중복 방지
+  const firedTriggerIdsRef = useRef<Set<number>>(new Set()); // 🔹 이미 실행한 트리거 id 기억
 
   /** GeoJSON(LineString) → RN Maps 좌표 배열로 변환 (메모이즈) */
   const courseCoordinates = useMemo<LatLng[]>(() => {
@@ -137,6 +148,44 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     announce();
   }, [isRunning]);
 
+  /** 새로운 코스/트리거가 들어오면, 이미 실행했던 트리거 기록 초기화 */
+  useEffect(() => {
+    firedTriggerIdsRef.current = new Set();
+  }, [voiceTriggers, recommendedCourse]);
+
+  /** 누적 거리(totalDistanceKm)가 증가할 때마다 voice_triggers 조건을 체크해서 TTS 실행 */
+  useEffect(() => {
+    if (!voiceTriggers || voiceTriggers.length === 0) return;
+
+    const checkTriggers = async () => {
+      for (let i = 0; i < voiceTriggers.length; i++) {
+        if (firedTriggerIdsRef.current.has(i)) continue;
+
+        const trig = voiceTriggers[i] as VoiceTrigger;
+        const triggerDistance =
+          trig.distance_km ?? trig.distance ?? null;
+        const message =
+          trig.message ?? trig.text ?? '';
+
+        if (
+          triggerDistance != null &&
+          totalDistanceKm >= triggerDistance &&
+          message
+        ) {
+          firedTriggerIdsRef.current.add(i);
+          try {
+            await Tts.stop();
+            await Tts.speak(message);
+          } catch (err) {
+            console.log('TTS voice trigger error', err);
+          }
+        }
+      }
+    };
+
+    checkTriggers();
+  }, [totalDistanceKm, voiceTriggers]);
+
   /** 위치 관측 시작/정리 + 지도 카메라 추적 + Provider로 위치 전달 */
   useEffect(() => {
     let mounted = true;
@@ -159,7 +208,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     const startWatch = async (): Promise<void> => {
       const granted = await ensureFineLocation();
       if (!granted) {
-        ToastAndroid?.show?.('위치 권한이 필요합니다.', ToastAndroid.SHORT);
+        ToastAndroid.show('위치 권한이 필요합니다.', ToastAndroid.SHORT);
         return;
       }
 
@@ -168,7 +217,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
         (position: GeoPosition) => {
           const { latitude, longitude } = position.coords;
           centerTo(position.coords);
-          updateUserLocation(latitude, longitude); // ← 팀 합의 API 호출
+          updateUserLocation(latitude, longitude);
         },
         (error) => console.log('getCurrentPosition error', error),
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }

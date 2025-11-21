@@ -2,49 +2,40 @@
 
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-// 누락된 Slider 컴포넌트 import 추가
 import Slider from '@react-native-community/slider'; 
 import SlopeButton from '../components/SlopeButton';
 import { useRunning, SLOPE_TYPES } from '../providers/running_provider';
 
 const RecommendationScreen = ({ navigation }) => {
-    // useRunning() 훅에서 모든 필요한 변수를 가져옵니다.
     const { 
         selectedSlope, 
         selectSlope, 
         fetchCourseRecommendation,
         isRecommendationLoading,
-        setTotalDistanceKm // Provider에 총 거리 저장 함수가 있다면 가져와야 합니다. (없다면 주석 처리)
     } = useRunning();
 
-    // UI 내부에서 관리할 거리 상태 (슬라이더의 현재 값)
     const [desiredDistance, setDesiredDistance] = useState(5.0); 
 
-    // 슬라이더 값이 변경될 때 실행되는 함수
     const handleDistanceChange = (value) => {
         const roundedValue = Math.round(value * 10) / 10;
         setDesiredDistance(roundedValue); 
-        
-        // setTotalDistanceKm 함수가 Provider에 없다면 주석 처리하거나, 
-        // Provider에 추가해야 합니다.
-        // setTotalDistanceKm(roundedValue); 
     };
     
     const handleRecommendCourse = async () => {
         if (isRecommendationLoading) return;
 
-        // 1. Mock API 호출
-        await fetchCourseRecommendation(desiredDistance, selectedSlope);
-        
-        // 2. 화면 이동: MainRunningScreen으로 이동
-        navigation.navigate('MainRunning'); 
+        const success = await fetchCourseRecommendation(desiredDistance, selectedSlope);
+
+        if (success) {
+            navigation.navigate('MainRunning'); 
+        }
     };
 
     return (
         <View style={styles.container}>
             <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.contentContainer}>
                 
-                {/* 1. 총 거리 슬라이더 영역 */}
+                {/* 1. 총 거리 슬라이더 */}
                 <View style={styles.settingBlock}>
                     <Text style={styles.title}>🏃‍♂️ 희망 총 거리 설정</Text>
                     
@@ -52,7 +43,7 @@ const RecommendationScreen = ({ navigation }) => {
                         <Text style={styles.distanceValue}>{desiredDistance.toFixed(1)} km</Text>
                     </View>
                     
-                    <Slider // <-- 슬라이더 컴포넌트가 삽입되었습니다.
+                    <Slider
                         style={{ width: '100%', height: 40 }}
                         minimumValue={1}
                         maximumValue={20}
@@ -67,11 +58,10 @@ const RecommendationScreen = ({ navigation }) => {
                     <Text style={styles.description}>슬라이더를 움직여 희망하는 러닝 거리를 설정해주세요.</Text>
                 </View>
 
-                {/* 2. 경사도 선택 영역 */}
+                {/* 2. 경사도 선택 */}
                 <View style={styles.settingBlock}>
                     <Text style={styles.title}>⛰️ 코스 경사도 선택</Text>
                     <View style={styles.buttonGroup}>
-                        
                         <SlopeButton
                             title="완만함 (FLAT)"
                             slopeType={SLOPE_TYPES.FLAT}
@@ -96,7 +86,7 @@ const RecommendationScreen = ({ navigation }) => {
 
             </ScrollView>
 
-            {/* 하단 버튼 및 로딩 스피너 */}
+            {/* 하단 추천 버튼 */}
             <TouchableOpacity 
                 style={[styles.recommendButton, isRecommendationLoading && styles.loadingButton]} 
                 onPress={handleRecommendCourse}
@@ -112,7 +102,6 @@ const RecommendationScreen = ({ navigation }) => {
     );
 };
 
-// ... (Stylesheets 부분은 쉼표 오류를 해결한 코드를 사용하고 있다고 가정합니다.)
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f9f9f9', },
     scrollContainer: { flex: 1, paddingHorizontal: 20, },
