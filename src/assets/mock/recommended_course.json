@@ -1,4 +1,3 @@
-// recommended_course.json
 {
   "status": "success",
   "message": "코스 추천이 성공적으로 완료되었습니다.",
