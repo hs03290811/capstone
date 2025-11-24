@@ -7,9 +7,16 @@ import SlopeButton from '../components/SlopeButton';
 import { useRunning, SLOPE_TYPES } from '../providers/running_provider';
 
 const RecommendationScreen = ({ navigation }) => {
+<<<<<<< HEAD
     const { 
         selectedSlope, 
         selectSlope, 
+=======
+    // useRunning() 훅에서 모든 필요한 변수를 가져옵니다.
+    const {
+        selectedSlope,
+        selectSlope,
+>>>>>>> minsung-new-branch
         fetchCourseRecommendation,
         isRecommendationLoading,
     } = useRunning();
@@ -24,11 +31,19 @@ const RecommendationScreen = ({ navigation }) => {
     const handleRecommendCourse = async () => {
         if (isRecommendationLoading) return;
 
+<<<<<<< HEAD
         const success = await fetchCourseRecommendation(desiredDistance, selectedSlope);
 
         if (success) {
             navigation.navigate('MainRunning'); 
         }
+=======
+        // 1. Mock API 호출
+        await fetchCourseRecommendation(desiredDistance, selectedSlope);
+
+        // 2. 후보 리스트 화면으로 이동
+        navigation.navigate('CourseList');
+>>>>>>> minsung-new-branch
     };
 
     return (
@@ -86,9 +101,15 @@ const RecommendationScreen = ({ navigation }) => {
 
             </ScrollView>
 
+<<<<<<< HEAD
             {/* 하단 추천 버튼 */}
             <TouchableOpacity 
                 style={[styles.recommendButton, isRecommendationLoading && styles.loadingButton]} 
+=======
+            {/* 하단 버튼 및 로딩 스피너 */}
+            <TouchableOpacity
+                style={[styles.recommendButton, isRecommendationLoading && styles.loadingButton]}
+>>>>>>> minsung-new-branch
                 onPress={handleRecommendCourse}
                 disabled={isRecommendationLoading}
             >

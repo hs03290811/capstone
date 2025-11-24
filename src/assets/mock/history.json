@@ -1,0 +1,53 @@
+[
+  {
+    "id": "run-2024-06-01",
+    "date": "2024-06-01",
+    "distanceKm": 5.2,
+    "duration": "00:32:14",
+    "slopeBreakdown": { "flat": 60, "moderate": 30, "steep": 10 },
+    "averageSpeed": "9.7",
+    "averagePace": "06:11",
+    "calories": 312,
+    "path": [
+      { "latitude": 37.528, "longitude": 126.935 },
+      { "latitude": 37.53, "longitude": 126.94 },
+      { "latitude": 37.533, "longitude": 126.948 }
+    ],
+    "title": "아침 러닝 - 한강 공원",
+    "notes": "시원한 강바람 덕분에 페이스 유지가 쉬웠다."
+  },
+  {
+    "id": "run-2024-06-05",
+    "date": "2024-06-05",
+    "distanceKm": 7.8,
+    "duration": "00:48:02",
+    "slopeBreakdown": { "flat": 40, "moderate": 40, "steep": 20 },
+    "averageSpeed": "9.7",
+    "averagePace": "06:09",
+    "calories": 468,
+    "path": [
+      { "latitude": 37.555, "longitude": 126.99 },
+      { "latitude": 37.558, "longitude": 126.995 },
+      { "latitude": 37.562, "longitude": 127.0 }
+    ],
+    "title": "야간 러닝 - 남산 순환",
+    "notes": "언덕 구간이 많아 체력 소모가 컸다."
+  },
+  {
+    "id": "run-2024-06-09",
+    "date": "2024-06-09",
+    "distanceKm": 3.6,
+    "duration": "00:22:30",
+    "slopeBreakdown": { "flat": 80, "moderate": 15, "steep": 5 },
+    "averageSpeed": "9.6",
+    "averagePace": "06:15",
+    "calories": 216,
+    "path": [
+      { "latitude": 37.565, "longitude": 126.97 },
+      { "latitude": 37.5665, "longitude": 126.972 },
+      { "latitude": 37.568, "longitude": 126.974 }
+    ],
+    "title": "회복 주간 가벼운 조깅",
+    "notes": "무릎에 무리 없이 가볍게 달림."
+  }
+]

@@ -1,3 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">RunningApp</string>
+
+    <!-- Google Maps API 키 -->
+    <string name="GOOGLE_MAPS_API_KEY">
+        AIzaSyDOCyc0JYkOMal9aEbZXbGUwo2XeNNhVSc
+    </string>
 </resources>
+

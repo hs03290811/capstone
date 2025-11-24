@@ -1,4 +1,5 @@
 .bundle/
+/__tests__/
 
 # Node
 node_modules/
@@ -44,3 +45,6 @@ pycache/
 *.pem
 #2. 4700만 줄짜리 원본 데이터
 *.gpkg
+
+#osm cache
+cache/

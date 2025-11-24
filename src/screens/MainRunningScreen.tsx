@@ -19,6 +19,7 @@ import Config from 'react-native-config';
 
 import { useRunning } from '../providers/running_provider';
 import type { RootStackParamList } from '../navigation/RootNavigator';
+import { buildSlopeSegments, geoJsonToCoordinates } from '../utils/courseHelpers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MainRunning'>;
 
@@ -67,8 +68,13 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     startRunning,
     stopRunning,
     recommendedCourse,
+<<<<<<< HEAD
     updateUserLocation,     // 위치 전달
     voiceTriggers,          // 🔹 파스2: 음성 안내 트리거
+=======
+    userPath,
+    updateUserLocation, // ← FE1에서 합의한 인터페이스: 위치 업데이트 전달
+>>>>>>> minsung-new-branch
   } = useRunning();
 
   // ▼ MapView/Geo watch 핸들 보관
@@ -78,18 +84,8 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
   const firedTriggerIdsRef = useRef<Set<number>>(new Set()); // 🔹 이미 실행한 트리거 id 기억
 
   /** GeoJSON(LineString) → RN Maps 좌표 배열로 변환 (메모이즈) */
-  const courseCoordinates = useMemo<LatLng[]>(() => {
-    const course = recommendedCourse as Course | null;
-    if (!course?.features?.length) return [];
-
-    return course.features.flatMap((feature) => {
-      if (feature.geometry?.type !== 'LineString') return [];
-      const coordinates = feature.geometry.coordinates;
-      if (!coordinates?.length) return [];
-      // GeoJSON: [lng, lat] → RN Maps: {latitude, longitude}
-      return coordinates.map(([longitude, latitude]) => ({ latitude, longitude }));
-    });
-  }, [recommendedCourse]);
+  const courseCoordinates = useMemo<LatLng[]>(() => geoJsonToCoordinates(recommendedCourse as Course | null), [recommendedCourse]);
+  const slopeSegments = useMemo(() => buildSlopeSegments(courseCoordinates), [courseCoordinates]);
 
   /** 지도 초기 영역: 경로가 있으면 첫 포인트 기준, 아니면 서울시청 근처 */
   const initialRegion = useMemo<Region>(() => {
@@ -297,9 +293,12 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
           showsUserLocation
           showsMyLocationButton
         >
-          {/* 추천 경로 라인 렌더 */}
-          {courseCoordinates.length > 0 && (
-            <Polyline coordinates={courseCoordinates} strokeColor="#5856D6" strokeWidth={5} />
+          {/* 추천 경로 라인 렌더 (경사도에 따라 색상 구분) */}
+          {slopeSegments.map((segment, index) => (
+            <Polyline key={`${segment.slope}-${index}`} coordinates={segment.coordinates} strokeColor={segment.color} strokeWidth={6} />
+          ))}
+          {userPath.length >= 2 && (
+            <Polyline coordinates={userPath} strokeColor="#5856D6" strokeWidth={5} />
           )}
         </MapView>
 
@@ -318,7 +317,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
         {/* 경로 정보 안내 */}
         <View style={styles.courseInfoBox}>
           <Text style={styles.courseInfoText}>
-            추천 코스 경로 {courseCoordinates.length} 포인트 로드 완료
+            색상으로 구분된 {slopeSegments.length}개 구간을 따라 러닝을 진행하세요.
           </Text>
         </View>
       </View>
