@@ -9,12 +9,11 @@ import { useRunning, SLOPE_TYPES } from '../providers/running_provider';
 
 const RecommendationScreen = ({ navigation }) => {
     // useRunning() 훅에서 모든 필요한 변수를 가져옵니다.
-    const { 
-        selectedSlope, 
-        selectSlope, 
+    const {
+        selectedSlope,
+        selectSlope,
         fetchCourseRecommendation,
         isRecommendationLoading,
-        setTotalDistanceKm // Provider에 총 거리 저장 함수가 있다면 가져와야 합니다. (없다면 주석 처리)
     } = useRunning();
 
     // UI 내부에서 관리할 거리 상태 (슬라이더의 현재 값)
@@ -35,9 +34,9 @@ const RecommendationScreen = ({ navigation }) => {
 
         // 1. Mock API 호출
         await fetchCourseRecommendation(desiredDistance, selectedSlope);
-        
-        // 2. 화면 이동: MainRunningScreen으로 이동
-        navigation.navigate('MainRunning'); 
+
+        // 2. 후보 리스트 화면으로 이동
+        navigation.navigate('CourseList');
     };
 
     return (
@@ -97,8 +96,8 @@ const RecommendationScreen = ({ navigation }) => {
             </ScrollView>
 
             {/* 하단 버튼 및 로딩 스피너 */}
-            <TouchableOpacity 
-                style={[styles.recommendButton, isRecommendationLoading && styles.loadingButton]} 
+            <TouchableOpacity
+                style={[styles.recommendButton, isRecommendationLoading && styles.loadingButton]}
                 onPress={handleRecommendCourse}
                 disabled={isRecommendationLoading}
             >
