@@ -2,10 +2,23 @@ import React from 'react';
 import { FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
+import SlopeSummaryBar from '../components/SlopeSummaryBar';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { useRunning } from '../providers/running_provider';
+import { buildDifficultyLabel } from '../utils/courseHelpers';
+import type { ColoredSegment } from '../utils/courseHelpers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CourseList'>;
+
+type RecommendedCourse = {
+  id: string;
+  courseName: string;
+  totalDistanceKm: number;
+  estimatedTimeMinutes: number;
+  slopeSegments?: ColoredSegment[];
+  slopeSummary?: { flat: number; moderate: number; steep: number; totalDistanceKm: number };
+  difficultyType?: string;
+};
 
 const CourseListScreen: React.FC<Props> = ({ navigation }) => {
   const { recommendedCourses, selectRecommendedCourse, isRecommendationLoading } = useRunning();
@@ -25,19 +38,26 @@ const CourseListScreen: React.FC<Props> = ({ navigation }) => {
       <FlatList
         data={recommendedCourses}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={styles.card}
-            onPress={() => handleSelect(item.id)}
-            disabled={isRecommendationLoading}
-          >
-            <Text style={styles.title}>{item.courseName}</Text>
-            <Text style={styles.meta}>
-              총 거리 {item.totalDistanceKm.toFixed(1)} km · 예상 {item.estimatedTimeMinutes} 분
-            </Text>
-            <Text style={styles.hint}>탭하여 지도와 세부 정보를 확인하세요.</Text>
-          </TouchableOpacity>
-        )}
+        renderItem={({ item }) => {
+          const typedItem = item as RecommendedCourse;
+          return (
+            <TouchableOpacity
+              style={styles.card}
+              onPress={() => handleSelect(item.id)}
+              disabled={isRecommendationLoading}
+            >
+              <Text style={styles.title}>{item.courseName}</Text>
+              <Text style={styles.meta}>
+                총 거리 {item.totalDistanceKm.toFixed(1)} km · 예상 {item.estimatedTimeMinutes} 분
+              </Text>
+              <Text style={styles.meta}>
+                난이도: {buildDifficultyLabel({ difficultyType: typedItem.difficultyType, slopeSummary: typedItem.slopeSummary })}
+              </Text>
+              <SlopeSummaryBar segments={typedItem.slopeSegments || []} />
+              <Text style={styles.hint}>탭하여 지도와 세부 정보를 확인하세요.</Text>
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={
           <View style={styles.emptyBox}>
             <Text style={styles.emptyText}>추천된 코스가 없습니다. 다시 시도해 주세요.</Text>

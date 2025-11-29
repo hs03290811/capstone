@@ -1,23 +1,51 @@
 // src/screens/RecommendationScreen.js
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, PermissionsAndroid, Platform, ToastAndroid } from 'react-native';
 // 누락된 Slider 컴포넌트 import 추가
-import Slider from '@react-native-community/slider'; 
-import SlopeButton from '../components/SlopeButton';
-import { useRunning, SLOPE_TYPES } from '../providers/running_provider';
+import Slider from '@react-native-community/slider';
+import Geolocation from 'react-native-geolocation-service';
+import { useRunning } from '../providers/running_provider';
 
 const RecommendationScreen = ({ navigation }) => {
     // useRunning() 훅에서 모든 필요한 변수를 가져옵니다.
     const {
-        selectedSlope,
-        selectSlope,
         fetchCourseRecommendation,
         isRecommendationLoading,
     } = useRunning();
 
     // UI 내부에서 관리할 거리 상태 (슬라이더의 현재 값)
-    const [desiredDistance, setDesiredDistance] = useState(5.0); 
+    const [desiredDistance, setDesiredDistance] = useState(5.0);
+
+    // 실제 위치를 한 번 조회해 추천 API에 넘겨주는 헬퍼
+    const requestCurrentLocation = async () => {
+        try {
+            if (Platform.OS === 'android') {
+                const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
+                if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+                    ToastAndroid?.show?.('위치 권한이 필요합니다.', ToastAndroid.SHORT);
+                    return null;
+                }
+            } else {
+                const auth = await Geolocation.requestAuthorization('whenInUse');
+                if (auth !== 'granted' && auth !== 'restricted') {
+                    return null;
+                }
+            }
+
+            return await new Promise((resolve, reject) => {
+                Geolocation.getCurrentPosition(
+                    (position) => resolve({ latitude: position.coords.latitude, longitude: position.coords.longitude }),
+                    (error) => reject(error),
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                );
+            });
+        } catch (error) {
+            console.log('현재 위치 조회 실패', error);
+            ToastAndroid?.show?.('현재 위치를 확인하지 못했습니다.', ToastAndroid.SHORT);
+            return null;
+        }
+    };
 
     // 슬라이더 값이 변경될 때 실행되는 함수
     const handleDistanceChange = (value) => {
@@ -32,8 +60,11 @@ const RecommendationScreen = ({ navigation }) => {
     const handleRecommendCourse = async () => {
         if (isRecommendationLoading) return;
 
-        // 1. Mock API 호출
-        await fetchCourseRecommendation(desiredDistance, selectedSlope);
+        const currentLocation = await requestCurrentLocation();
+        if (!currentLocation) return;
+
+        // 1. 실제 추천 API 호출 (위치 + 거리)
+        await fetchCourseRecommendation(desiredDistance, null, currentLocation);
 
         // 2. 후보 리스트 화면으로 이동
         navigation.navigate('CourseList');
@@ -64,33 +95,6 @@ const RecommendationScreen = ({ navigation }) => {
                         disabled={isRecommendationLoading}
                     />
                     <Text style={styles.description}>슬라이더를 움직여 희망하는 러닝 거리를 설정해주세요.</Text>
-                </View>
-
-                {/* 2. 경사도 선택 영역 */}
-                <View style={styles.settingBlock}>
-                    <Text style={styles.title}>⛰️ 코스 경사도 선택</Text>
-                    <View style={styles.buttonGroup}>
-                        
-                        <SlopeButton
-                            title="완만함 (FLAT)"
-                            slopeType={SLOPE_TYPES.FLAT}
-                            selectedSlope={selectedSlope}
-                            onSelect={selectSlope}
-                        />
-                        <SlopeButton
-                            title="보통 (MODERATE)"
-                            slopeType={SLOPE_TYPES.MODERATE}
-                            selectedSlope={selectedSlope}
-                            onSelect={selectSlope}
-                        />
-                        <SlopeButton
-                            title="가파름 (STEEP)"
-                            slopeType={SLOPE_TYPES.STEEP}
-                            selectedSlope={selectedSlope}
-                            onSelect={selectSlope}
-                        />
-                    </View>
-                    <Text style={styles.description}>선택하신 경사도에 맞춰 최적의 코스를 추천합니다.</Text>
                 </View>
 
             </ScrollView>

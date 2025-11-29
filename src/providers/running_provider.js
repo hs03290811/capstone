@@ -2,19 +2,18 @@
 
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { ToastAndroid } from 'react-native';
+import Config from 'react-native-config';
 import * as geolib from 'geolib'; // 거리 계산 라이브러리
-import courseCandidatesMock from '../assets/mock/recommended_courses.json';
-import initialHistory from '../assets/mock/history.json';
+import { computeCalorieSample as computeCalorieSampleFromUtil } from '../utils/calorieCalculator';
+import {
+    buildSlopeSegments,
+    coordinatesToGeoJson,
+    geoJsonToCoordinates,
+    normalizeDifficultyType,
+    summarizeSegments,
+} from '../utils/courseHelpers';
 
-// 경사도 타입 상수 정의
-export const SLOPE_TYPES = {
-    FLAT: 'FLAT',
-    MODERATE: 'MODERATE',
-    STEEP: 'STEEP',
-};
-
-// Mock Data 및 상수
-const METER_PER_SECOND = 3; 
+// 러닝 컨텍스트에서 사용하는 기본 상수 (목업 미사용)
 
 const RunningContext = createContext();
 const HISTORY_STORAGE_KEY = 'running_history_records';
@@ -33,13 +32,14 @@ export const RunningProvider = ({ children }) => {
     const [isRunning, setIsRunning] = useState(false);
     const [totalDistanceMeters, setTotalDistanceMeters] = useState(0);
     const [currentTimeSeconds, setCurrentTimeSeconds] = useState(0);
-    const [lastKnownPosition, setLastKnownPosition] = useState(null); 
-    const [selectedSlope, setSelectedSlope] = useState(SLOPE_TYPES.FLAT);
+    const [lastKnownPosition, setLastKnownPosition] = useState(null);
     const [recommendedCourse, setRecommendedCourse] = useState(null);
     const [recommendedCourseInfo, setRecommendedCourseInfo] = useState(null);
+    const [recommendedCourseSegments, setRecommendedCourseSegments] = useState([]); // 지도/목록에서 재사용할 경사 세그먼트
+    const [recommendedCourseSummary, setRecommendedCourseSummary] = useState(null); // 경사 합계를 빠르게 불러오기 위한 요약값
     const [recommendedCourses, setRecommendedCourses] = useState([]);
     const [isRecommendationLoading, setIsRecommendationLoading] = useState(false);
-    const [historyRecords, setHistoryRecords] = useState(initialHistory);
+    const [historyRecords, setHistoryRecords] = useState([]); // 백엔드/스토리지 데이터만 사용
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [isHistorySyncAttempted, setIsHistorySyncAttempted] = useState(false);
     const [userPath, setUserPath] = useState([]);
@@ -65,17 +65,13 @@ export const RunningProvider = ({ children }) => {
     const startRunning = () => {
         if (isRunning) return;
 
+        // 러닝 타이머만 증가시키고, 실제 이동 거리는 GPS 업데이트로만 반영한다.
         setIsRunning(true);
         console.log("러닝 시작: 타이머 가동");
 
         intervalRef.current = setInterval(() => {
-            // 시간 업데이트 (기존 로직 유지)
             setCurrentTimeSeconds(prevTime => prevTime + 1);
-            
-            // --- [임시 추가] 자체 테스트를 위한 Mock 거리 로직 재도입 ---
-            setTotalDistanceMeters(prevDistance => prevDistance + METER_PER_SECOND);
-            
-        }, 1000); 
+        }, 1000);
     };
 
     const stopRunning = () => {
@@ -87,11 +83,6 @@ export const RunningProvider = ({ children }) => {
         }
     };
     
-    // 경사도 선택 함수
-    const selectSlope = (slopeType) => {
-        setSelectedSlope(slopeType); 
-    };
-
     // GPS 위치 수신 및 거리 계산 (FE 1 호출용)
     const updateUserLocation = (latitude, longitude) => {
         if (!isRunning) return;
@@ -107,18 +98,84 @@ export const RunningProvider = ({ children }) => {
         }
         setLastKnownPosition(newPosition);
         setUserPath((prev) => [...prev, newPosition]);
+
     };
 
-    // Mock API 연동 함수
-    const fetchCourseRecommendation = async (distance, slope) => {
+    /**
+     * 추천 코스를 백엔드에서 받아오는 함수.
+     * - 현재 위치/희망 거리 정보를 바탕으로 실제 API 호출.
+     */
+    const fetchCourseRecommendation = async (distanceKm, _slope, currentLocation) => {
         setIsRecommendationLoading(true);
         setRecommendedCourse(null);
         setRecommendedCourseInfo(null);
-        await new Promise(resolve => setTimeout(resolve, 800));
-        const mockData = courseCandidatesMock.courses || [];
-        setRecommendedCourses(mockData);
-        setIsRecommendationLoading(false);
-        return mockData;
+        setRecommendedCourseSegments([]);
+        setRecommendedCourseSummary(null);
+
+        try {
+            const targetKm = Number(distanceKm) || 0;
+            const currentLat = currentLocation?.latitude ?? lastKnownPosition?.latitude;
+            const currentLon = currentLocation?.longitude ?? lastKnownPosition?.longitude;
+
+            if (!Number.isFinite(currentLat) || !Number.isFinite(currentLon)) {
+                showUserNotification('현재 위치를 확인할 수 없습니다. 위치 권한을 확인해주세요.');
+                setIsRecommendationLoading(false);
+                return [];
+            }
+
+            // 실제 추천 API 호출
+            const response = await fetch(`${Config.API_BASE_URL}/api/recommend`, {
+                method: 'POST',
+                headers: {
+                    accept: 'application/json',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    current_lat: currentLat,
+                    current_lon: currentLon,
+                    target_km: targetKm,
+                }),
+            });
+
+            if (!response.ok) {
+                throw new Error('추천 코스 API 호출에 실패했습니다.');
+            }
+
+            const data = await response.json();
+            const normalizedRoutes = Array.isArray(data?.routes) ? data.routes : [];
+            const normalized = normalizedRoutes.map((item, index) => {
+                const coordinates = Array.isArray(item?.path) ? item.path : [];
+                const coursePath = coordinatesToGeoJson(coordinates);
+                const latLngs = geoJsonToCoordinates(coursePath);
+                const slopeValues = Array.isArray(item?.slopes) ? item.slopes : [];
+                const slopeSegments = buildSlopeSegments(latLngs, slopeValues);
+                const slopeSummary = summarizeSegments(slopeSegments);
+
+                return {
+                    id: String(item.id ?? index),
+                    courseName: item.course_name || `추천 코스 ${index + 1}`,
+                    totalDistanceKm: Number(item.total_distance || item.total_distance_m || 0) / 1000,
+                    estimatedTimeMinutes: item.total_time_min ?? Math.round((Number(item.total_distance || 0) / 1000) / 8 * 60),
+                    coursePath,
+                    slopeSegments,
+                    slopeSummary,
+                    // 백엔드가 주는 난이도 문자열을 표준 형태로 맞춰 화면 전역에서 동일하게 표시
+                    difficultyType: normalizeDifficultyType(item.type),
+                };
+            });
+
+            // 실제 백엔드에서 받은 데이터만 저장하고, 응답이 비었으면 빈 배열을 사용한다.
+            setRecommendedCourses(normalized);
+            return normalized;
+        } catch (error) {
+            console.log('추천 코스 호출 실패', error);
+            showUserNotification('코스 추천에 실패했습니다. 네트워크 상태를 확인해주세요.');
+            // 목업 폴백 없이 빈 배열로 유지해 실제 데이터만 사용
+            setRecommendedCourses([]);
+            return [];
+        } finally {
+            setIsRecommendationLoading(false);
+        }
     };
 
     const selectRecommendedCourse = (courseId) => {
@@ -129,7 +186,11 @@ export const RunningProvider = ({ children }) => {
             totalDistanceKm: target.totalDistanceKm,
             estimatedTimeMinutes: target.estimatedTimeMinutes,
             courseName: target.courseName,
+            difficultyType: target.difficultyType,
+            slopeSummary: target.slopeSummary,
         });
+        setRecommendedCourseSegments(target.slopeSegments || []);
+        setRecommendedCourseSummary(target.slopeSummary || null);
         return target;
     };
 
@@ -139,11 +200,12 @@ export const RunningProvider = ({ children }) => {
         setCurrentTimeSeconds(0);
         setRecommendedCourse(null);
         setRecommendedCourseInfo(null);
+        setRecommendedCourseSegments([]);
+        setRecommendedCourseSummary(null);
         setRecommendedCourses([]);
         setLastKnownPosition(null);
         setUserPath([]);
         setCaloriesBurned(0);
-        // [선택] 경사도도 초기화하려면: setSelectedSlope(SLOPE_TYPES.FLAT);
     };
 
     /**
@@ -299,12 +361,13 @@ export const RunningProvider = ({ children }) => {
                 return;
             }
 
-            setHistoryRecords(initialHistory);
-            showUserNotification('기존 러닝 기록을 불러오지 못해 기본 값을 사용합니다.');
+            // 백엔드/스토리지에 기록이 없을 때는 빈 배열로 초기화한다.
+            setHistoryRecords([]);
+            showUserNotification('저장된 러닝 기록이 없어 빈 목록을 사용합니다.');
         } catch (error) {
             console.log('러닝 기록 초기화 실패', error);
-            setHistoryRecords(initialHistory);
-            showUserNotification('러닝 기록을 불러오지 못해 기본 값을 사용합니다.');
+            setHistoryRecords([]);
+            showUserNotification('러닝 기록을 불러오는 중 문제가 발생해 빈 목록을 사용합니다.');
         } finally {
             setIsHistorySyncAttempted(true);
             setIsHistoryLoading(false);
@@ -387,9 +450,8 @@ export const RunningProvider = ({ children }) => {
      * 새 API 요구사항에 맞춰 weightKg, speedKmh, inclinePercent, sampleSeconds만 사용한다.
      */
     const computeCalorieSample = ({ weightKg, speedKmh, inclinePercent, sampleSeconds }) => {
-        const met = 1 + speedKmh * 0.7 + inclinePercent * 0.1; // 임시 MET 추정치
-        const caloriesPerMinute = (met * 3.5 * weightKg) / 200;
-        return Math.round(caloriesPerMinute * (sampleSeconds / 60));
+        // MET 테이블 기반으로 샘플 칼로리를 계산하는 공용 유틸을 사용해 중복 로직을 줄인다.
+        return computeCalorieSampleFromUtil({ weightKg, speedKmh, inclinePercent, sampleSeconds });
     };
 
     /**
@@ -418,6 +480,16 @@ export const RunningProvider = ({ children }) => {
             isProfileLoading,
         };
     }, [isProfileLoaded, isProfileLoading, userProfile]);
+
+    // Provider 언마운트 시 타이머가 남지 않도록 정리한다.
+    useEffect(() => {
+        return () => {
+            if (intervalRef.current) {
+                clearInterval(intervalRef.current);
+                intervalRef.current = null;
+            }
+        };
+    }, []);
 
     // 러닝 중 거리·시간 변화에 따라 실시간 누적 칼로리 계산
     useEffect(() => {
@@ -459,10 +531,10 @@ export const RunningProvider = ({ children }) => {
     const value = {
         isRunning, totalDistanceMeters, totalDistanceKm, formattedTime: formatTime(currentTimeSeconds),
         lastKnownPosition,
-        selectedSlope, recommendedCourse, recommendedCourseInfo, recommendedCourses, isRecommendationLoading,
+        recommendedCourse, recommendedCourseInfo, recommendedCourseSegments, recommendedCourseSummary, recommendedCourses, isRecommendationLoading,
         historyRecords, userPath, isHistoryLoading, userProfile, caloriesBurned,isProfileLoading, isProfileLoaded,
 
-        startRunning, stopRunning, selectSlope,
+        startRunning, stopRunning,
         fetchCourseRecommendation, selectRecommendedCourse, resetRunData, updateUserLocation, addRunRecord,
         loadProfile, saveProfile, sampleCalories,
     };
