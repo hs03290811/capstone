@@ -249,9 +249,10 @@ export const RunningProvider = ({ children }) => {
             }
 
 
-            setRecommendedCourses(recommendedCourses);
             console.log('코스 추천 API(fetch) 호출 성공, 상태에 데이터 저장 완료');
-            return recommendedCourses.length > 0;
+
+            // ✅ 성공 여부는 normalizedCourses 기준으로 판단
+            return normalizedCourses.length > 0;
         } catch (error) {
             console.error('코스 추천 API(fetch) 호출 실패:', error);
             // 실패 시 상태 초기화
