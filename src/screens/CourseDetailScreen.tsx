@@ -7,6 +7,7 @@ import { useRunning } from '../providers/running_provider';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import {
   SLOPE_COLORS,
+  buildDifficultyLabel,
   buildSlopeSegments,
   geoJsonToCoordinates,
   getBoundingRegion,
@@ -20,6 +21,8 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   const {
     recommendedCourse,
     recommendedCourseInfo,
+    recommendedCourseSegments,
+    recommendedCourseSummary,
     recommendedCourses,
     selectRecommendedCourse,
   } = useRunning();
@@ -34,8 +37,17 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [courseId, navigation, recommendedCourse, recommendedCourseInfo, recommendedCourses.length, selectRecommendedCourse]);
 
   const coordinates = useMemo(() => geoJsonToCoordinates(recommendedCourse ?? undefined), [recommendedCourse]);
-  const segments = useMemo(() => buildSlopeSegments(coordinates), [coordinates]);
-  const stats = useMemo(() => summarizeSegments(segments), [segments]);
+  const segments = useMemo(
+    () =>
+      (recommendedCourseSegments?.length ? recommendedCourseSegments : buildSlopeSegments(coordinates)) as ReturnType<
+        typeof buildSlopeSegments
+      >,
+    [coordinates, recommendedCourseSegments],
+  );
+  const stats = useMemo(
+    () => recommendedCourseSummary ?? summarizeSegments(segments),
+    [recommendedCourseSummary, segments],
+  );
 
   const initialRegion = useMemo(() => getBoundingRegion(coordinates), [coordinates]);
 
@@ -80,7 +92,10 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.statRow}>
           <InfoBlock label="총 거리" value={`${(recommendedCourseInfo?.totalDistanceKm ?? stats.totalDistanceKm).toFixed(1)} km`} />
           <InfoBlock label="예상 시간" value={`${recommendedCourseInfo?.estimatedTimeMinutes ?? 30} 분`} />
-          <InfoBlock label="난이도" value={buildDifficultyLabel(stats)} />
+          <InfoBlock
+            label="난이도"
+            value={buildDifficultyLabel({ difficultyType: recommendedCourseInfo?.difficultyType, slopeSummary: stats })}
+          />
         </View>
 
         <View style={styles.card}>
@@ -122,17 +137,6 @@ const Legend = ({ color, label, value }: { color: string; label: string; value: 
     </View>
   </View>
 );
-
-function buildDifficultyLabel(stats: ReturnType<typeof summarizeSegments>) {
-  const { flat, moderate, steep } = stats;
-  const total = flat + moderate + steep;
-  if (total === 0) return '정보 없음';
-
-  const steepRatio = steep / total;
-  if (steepRatio > 0.25) return '고난도';
-  if (steepRatio > 0.15) return '중간';
-  return '쉬움';
-}
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f7f7f7' },

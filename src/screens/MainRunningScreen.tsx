@@ -18,7 +18,7 @@ import Config from 'react-native-config';
 
 import { useRunning } from '../providers/running_provider';
 import type { RootStackParamList } from '../navigation/RootNavigator';
-import { buildSlopeSegments, geoJsonToCoordinates } from '../utils/courseHelpers';
+import { buildSlopeSegments, geoJsonToCoordinates, type ColoredSegment } from '../utils/courseHelpers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MainRunning'>;
 
@@ -59,6 +59,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     startRunning,
     stopRunning,
     recommendedCourse,
+    recommendedCourseSegments,
     userPath,
     updateUserLocation, // ← FE1에서 합의한 인터페이스: 위치 업데이트 전달
   } = useRunning();
@@ -70,7 +71,13 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
 
   /** GeoJSON(LineString) → RN Maps 좌표 배열로 변환 (메모이즈) */
   const courseCoordinates = useMemo<LatLng[]>(() => geoJsonToCoordinates(recommendedCourse as Course | null), [recommendedCourse]);
-  const slopeSegments = useMemo(() => buildSlopeSegments(courseCoordinates), [courseCoordinates]);
+  const slopeSegments = useMemo<ColoredSegment[]>(() => {
+    // Provider에서 내려준 세그먼트가 있으면 우선 사용하고, 없을 때만 좌표 기반으로 재계산한다.
+    if (Array.isArray(recommendedCourseSegments) && recommendedCourseSegments.length > 0) {
+      return recommendedCourseSegments as ColoredSegment[];
+    }
+    return buildSlopeSegments(courseCoordinates);
+  }, [courseCoordinates, recommendedCourseSegments]);
 
   /** 지도 초기 영역: 경로가 있으면 첫 포인트 기준, 아니면 서울시청 근처 */
   const initialRegion = useMemo<Region>(() => {
