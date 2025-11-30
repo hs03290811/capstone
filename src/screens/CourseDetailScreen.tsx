@@ -49,6 +49,27 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [recommendedCourseSummary, segments],
   );
 
+  const averageSlopeValue = useMemo(() => {
+    if (Number.isFinite(recommendedCourseInfo?.averageSlope)) {
+      return Number(recommendedCourseInfo?.averageSlope);
+    }
+
+    // API 값이 없으면 세그먼트 경사도를 거리 가중 평균으로 계산해 표시한다.
+    const weighted = segments.reduce(
+      (acc, seg) => {
+        const slopeValue = Number(seg.slopeValue);
+        if (!Number.isFinite(slopeValue)) return acc;
+        return {
+          distance: acc.distance + seg.distanceMeters,
+          sum: acc.sum + slopeValue * seg.distanceMeters,
+        };
+      },
+      { distance: 0, sum: 0 },
+    );
+
+    return weighted.distance > 0 ? weighted.sum / weighted.distance : null;
+  }, [recommendedCourseInfo?.averageSlope, segments]);
+
   const initialRegion = useMemo(() => getBoundingRegion(coordinates), [coordinates]);
 
   const handleStart = () => {
@@ -95,6 +116,12 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
           <InfoBlock
             label="난이도"
             value={buildDifficultyLabel({ difficultyType: recommendedCourseInfo?.difficultyType, slopeSummary: stats })}
+          />
+          <InfoBlock
+            label="평균 경사도"
+            value={
+              Number.isFinite(averageSlopeValue) ? `${Number(averageSlopeValue).toFixed(1)}%` : '정보 없음'
+            }
           />
         </View>
 
@@ -151,12 +178,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#e6e6e6',
     marginBottom: 16,
   },
-  statRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 },
+  statRow: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 16 },
   infoBlock: {
-    flex: 1,
+    width: '48%',
     backgroundColor: '#fff',
     padding: 14,
-    marginHorizontal: 4,
+    marginBottom: 8,
     borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },

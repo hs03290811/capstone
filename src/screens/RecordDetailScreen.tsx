@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState, useEffect } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import MapView, { Polyline } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
@@ -9,10 +9,42 @@ import { useRunning } from '../providers/running_provider';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RecordDetail'>;
 
-const RecordDetailScreen: React.FC<Props> = ({ route }) => {
+const RecordDetailScreen: React.FC<Props> = ({ route, navigation }) => {
   const { recordId } = route.params;
-  const { historyRecords } = useRunning();
+  const { historyRecords, updateRunRecord, deleteRunRecord } = useRunning();
   const record = useMemo(() => (historyRecords as any[]).find((item) => item.id === recordId), [historyRecords, recordId]);
+  const [titleInput, setTitleInput] = useState(record?.title ?? '');
+  const [memoInput, setMemoInput] = useState(record?.notes ?? '');
+
+  useEffect(() => {
+    setTitleInput(record?.title ?? '');
+    setMemoInput(record?.notes ?? '');
+  }, [record]);
+
+  const handleSave = async () => {
+    if (!record) return;
+    const isSaved = await updateRunRecord(record.id, { title: titleInput, notes: memoInput });
+    if (isSaved) {
+      ToastAndroid?.show?.('기록이 업데이트되었습니다.', ToastAndroid.SHORT);
+    }
+  };
+
+  const handleDelete = () => {
+    if (!record) return;
+    Alert.alert('기록 삭제', '이 기록을 삭제할까요?', [
+      { text: '취소', style: 'cancel' },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: async () => {
+          const isDeleted = await deleteRunRecord(record.id);
+          if (isDeleted) {
+            navigation.goBack();
+          }
+        },
+      },
+    ]);
+  };
   const coordinates = record?.path ?? [
     { latitude: 37.5665, longitude: 126.978 },
     { latitude: 37.57, longitude: 126.98 },
@@ -31,7 +63,12 @@ const RecordDetailScreen: React.FC<Props> = ({ route }) => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.header}>{record.title}</Text>
+      <TextInput
+        style={styles.headerInput}
+        value={titleInput}
+        onChangeText={setTitleInput}
+        placeholder="러닝 제목을 입력하세요"
+      />
       <Text style={styles.subHeader}>{record.date}</Text>
 
       <View style={styles.mapWrapper}>
@@ -71,7 +108,23 @@ const RecordDetailScreen: React.FC<Props> = ({ route }) => {
 
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>메모</Text>
-        <Text style={styles.paragraph}>{record.notes}</Text>
+        <TextInput
+          style={styles.input}
+          multiline
+          placeholder="러닝 소감을 입력하세요"
+          value={memoInput}
+          onChangeText={setMemoInput}
+          textAlignVertical="top"
+        />
+      </View>
+
+      <View style={styles.buttonRow}>
+        <TouchableOpacity style={[styles.actionButton, styles.deleteButton]} onPress={handleDelete}>
+          <Text style={styles.actionText}>삭제</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.actionButton, styles.saveButton]} onPress={handleSave}>
+          <Text style={styles.actionText}>저장</Text>
+        </TouchableOpacity>
       </View>
     </ScrollView>
   );
@@ -98,6 +151,12 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f7f7f7' },
   content: { padding: 20, paddingBottom: 40 },
   header: { fontSize: 22, fontWeight: 'bold', color: '#333' },
+  headerInput: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    paddingVertical: 4,
+  },
   subHeader: { fontSize: 14, color: '#666', marginBottom: 12 },
   mapWrapper: {
     height: 220,
@@ -134,11 +193,30 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: 16, fontWeight: 'bold', color: '#333', marginBottom: 10 },
   paragraph: { fontSize: 14, color: '#555', lineHeight: 20 },
+  input: {
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 10,
+    minHeight: 100,
+    fontSize: 14,
+    color: '#333',
+  },
   legendRow: { flexDirection: 'row', justifyContent: 'space-between' },
   legendItem: { flexDirection: 'row', alignItems: 'center' },
   legendDot: { width: 14, height: 14, borderRadius: 7, marginRight: 8 },
   legendLabel: { fontSize: 13, color: '#333' },
   legendValue: { fontSize: 12, color: '#666' },
+  buttonRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
+  actionButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  deleteButton: { backgroundColor: '#FF3B30' },
+  saveButton: { backgroundColor: '#5856D6' },
+  actionText: { color: '#fff', fontWeight: 'bold' },
 });
 
 export default RecordDetailScreen;
