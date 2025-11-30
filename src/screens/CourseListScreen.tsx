@@ -40,18 +40,21 @@ const CourseListScreen: React.FC<Props> = ({ navigation }) => {
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => {
           const typedItem = item as RecommendedCourse;
+          const difficultyLabel = buildDifficultyLabel({
+            difficultyType: typedItem.difficultyType,
+            slopeSummary: typedItem.slopeSummary,
+          });
+          // 난이도 문구를 한 번만 굵게 보여주고, 코스명이 따로 없을 때는 난이도 라벨을 제목으로 사용한다.
+          const titleText = difficultyLabel || typedItem.courseName || '추천 코스';
           return (
             <TouchableOpacity
               style={styles.card}
               onPress={() => handleSelect(item.id)}
               disabled={isRecommendationLoading}
             >
-              <Text style={styles.title}>{item.courseName}</Text>
+              <Text style={styles.title}>{titleText}</Text>
               <Text style={styles.meta}>
                 총 거리 {item.totalDistanceKm.toFixed(1)} km · 예상 {item.estimatedTimeMinutes} 분
-              </Text>
-              <Text style={styles.meta}>
-                난이도: {buildDifficultyLabel({ difficultyType: typedItem.difficultyType, slopeSummary: typedItem.slopeSummary })}
               </Text>
               <SlopeSummaryBar segments={typedItem.slopeSegments || []} />
               <Text style={styles.hint}>탭하여 지도와 세부 정보를 확인하세요.</Text>
@@ -86,6 +89,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   title: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  difficulty: { fontSize: 13, color: '#666', marginTop: 4 },
   meta: { fontSize: 13, color: '#555', marginTop: 6 },
   hint: { fontSize: 12, color: '#888', marginTop: 6 },
   emptyBox: { padding: 40, alignItems: 'center' },

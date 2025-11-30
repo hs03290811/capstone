@@ -102,8 +102,9 @@ export const RunningProvider = ({ children }) => {
     };
 
     /**
-     * 추천 코스를 백엔드에서 받아오는 함수.
-     * - 현재 위치/희망 거리 정보를 바탕으로 실제 API 호출.
+     * 추천 코스 조회 플로우
+     * 1) 상태 리셋 → 2) 추천 API 호출 → 3) GeoJSON 응답을 내부 표준 구조로 변환 → 4) 경사 세그먼트/거리 재계산 후 저장
+     * - 백엔드가 반환하는 FeatureCollection 포맷만 처리하며, 과거 route 배열 포맷은 제거했다.
      */
     const fetchCourseRecommendation = async (distanceKm, _slope, currentLocation) => {
         setIsRecommendationLoading(true);
@@ -111,6 +112,46 @@ export const RunningProvider = ({ children }) => {
         setRecommendedCourseInfo(null);
         setRecommendedCourseSegments([]);
         setRecommendedCourseSummary(null);
+
+        // 백엔드 응답 스펙(GeoJSON FeatureCollection) 전용 파서
+        const normalizeCoursePayload = (payload = {}) => {
+            if (payload?.type !== 'FeatureCollection' || !Array.isArray(payload.features)) return [];
+
+            return payload.features.map((feature, index) => {
+                const coordinates = Array.isArray(feature?.geometry?.coordinates)
+                    ? feature.geometry.coordinates
+                    : [];
+                const slopeValues = Array.isArray(feature?.properties?.slopes)
+                    ? feature.properties.slopes
+                    : [];
+                const totalDistanceMeters = Number(feature?.properties?.total_distance ?? 0);
+                const estimatedTimeMinutes = feature?.properties?.total_time_min;
+                const averageSlope = Number(feature?.properties?.avg_slope);
+
+                return {
+                    id: feature?.properties?.label ?? index,
+                    courseName: feature?.properties?.label || `추천 코스 ${index + 1}`,
+                    coordinates,
+                    slopeValues,
+                    totalDistanceMeters,
+                    estimatedTimeMinutes,
+                    difficultyType: normalizeDifficultyType(feature?.properties?.type),
+                    averageSlope,
+                };
+            });
+        };
+
+        // 유효성 에러 메시지 추출용 헬퍼 (새 API의 detail 배열 대응)
+        const extractValidationMessage = (payload = {}) => {
+            const details = payload?.detail;
+            if (!Array.isArray(details) || details.length === 0) return null;
+
+            const first = details[0];
+            const locText = Array.isArray(first?.loc) ? first.loc.join(' > ') : '';
+            const msgText = first?.msg || first?.message || '';
+
+            return [locText, msgText].filter(Boolean).join(': ');
+        };
 
         try {
             const targetKm = Number(distanceKm) || 0;
@@ -137,30 +178,79 @@ export const RunningProvider = ({ children }) => {
                 }),
             });
 
+            const data = await response.json().catch(() => ({}));
+
             if (!response.ok) {
-                throw new Error('추천 코스 API 호출에 실패했습니다.');
+                const validationMessage = extractValidationMessage(data);
+                const errorMessage = validationMessage || '추천 코스 API 호출에 실패했습니다.';
+                throw new Error(errorMessage);
             }
 
-            const data = await response.json();
-            const normalizedRoutes = Array.isArray(data?.routes) ? data.routes : [];
-            const normalized = normalizedRoutes.map((item, index) => {
-                const coordinates = Array.isArray(item?.path) ? item.path : [];
-                const coursePath = coordinatesToGeoJson(coordinates);
+            const normalizedCourses = normalizeCoursePayload(data);
+            const normalized = normalizedCourses.map((item, index) => {
+                const coursePath = coordinatesToGeoJson(item.coordinates);
                 const latLngs = geoJsonToCoordinates(coursePath);
-                const slopeValues = Array.isArray(item?.slopes) ? item.slopes : [];
-                const slopeSegments = buildSlopeSegments(latLngs, slopeValues);
-                const slopeSummary = summarizeSegments(slopeSegments);
+
+                // 1) 좌표-경사 배열 길이를 맞춰 잘라낸다.
+                const trimmedSlopeValues = Array.isArray(item.slopeValues)
+                    ? item.slopeValues.slice(0, Math.max(0, latLngs.length - 1))
+                    : [];
+
+                const rawSlopeSegments = buildSlopeSegments(latLngs, trimmedSlopeValues);
+                const rawDistanceSum = rawSlopeSegments.reduce((sum, seg) => sum + seg.distanceMeters, 0);
+
+                // 2) 서버 total_distance와 직선거리 합이 어긋나는 경우 비율로 스케일링
+                const targetDistanceMeters = Number(item.totalDistanceMeters) || rawDistanceSum;
+                const rescaledSegments = rawDistanceSum > 0 && targetDistanceMeters > 0
+                    ? rawSlopeSegments.map((seg) => ({
+                        ...seg,
+                        distanceMeters: (seg.distanceMeters * targetDistanceMeters) / rawDistanceSum,
+                    }))
+                    : rawSlopeSegments;
+
+                // 3) 부동소수점 누적 오차로 합계가 살짝 어긋나면 마지막 세그먼트에 보정값을 반영한다.
+                const scaledDistanceSum = rescaledSegments.reduce((sum, seg) => sum + seg.distanceMeters, 0);
+                const distanceGap = targetDistanceMeters - scaledDistanceSum;
+                const normalizedSlopeSegments = rescaledSegments.map((seg, segIndex) => {
+                    if (segIndex !== rescaledSegments.length - 1) return seg;
+                    const adjusted = Math.max(0, seg.distanceMeters + distanceGap);
+                    return { ...seg, distanceMeters: adjusted };
+                });
+
+                const slopeSummary = summarizeSegments(normalizedSlopeSegments);
+
+                const totalDistanceMeters = targetDistanceMeters || slopeSummary.totalDistanceKm * 1000;
+                const estimatedTimeMinutes =
+                    Number(item.estimatedTimeMinutes) || Math.round((totalDistanceMeters / 1000 / 8) * 60);
+                const averageSlope = Number.isFinite(item.averageSlope)
+                    ? item.averageSlope
+                    : (() => {
+                        // 경사 평균값이 누락된 경우, 각 세그먼트 경사도를 거리 가중 평균으로 계산한다.
+                        const weighted = normalizedSlopeSegments.reduce(
+                            (acc, seg) => {
+                                const slopeValue = Number(seg.slopeValue);
+                                if (!Number.isFinite(slopeValue)) return acc;
+                                return {
+                                    distance: acc.distance + seg.distanceMeters,
+                                    sum: acc.sum + slopeValue * seg.distanceMeters,
+                                };
+                            },
+                            { distance: 0, sum: 0 },
+                        );
+
+                        return weighted.distance > 0 ? weighted.sum / weighted.distance : null;
+                    })();
 
                 return {
                     id: String(item.id ?? index),
-                    courseName: item.course_name || `추천 코스 ${index + 1}`,
-                    totalDistanceKm: Number(item.total_distance || item.total_distance_m || 0) / 1000,
-                    estimatedTimeMinutes: item.total_time_min ?? Math.round((Number(item.total_distance || 0) / 1000) / 8 * 60),
+                    courseName: item.courseName || `추천 코스 ${index + 1}`,
+                    totalDistanceKm: totalDistanceMeters / 1000,
+                    estimatedTimeMinutes,
                     coursePath,
-                    slopeSegments,
+                    slopeSegments: normalizedSlopeSegments,
                     slopeSummary,
-                    // 백엔드가 주는 난이도 문자열을 표준 형태로 맞춰 화면 전역에서 동일하게 표시
-                    difficultyType: normalizeDifficultyType(item.type),
+                    difficultyType: item.difficultyType ?? normalizeDifficultyType(item?.type),
+                    averageSlope,
                 };
             });
 
@@ -169,7 +259,7 @@ export const RunningProvider = ({ children }) => {
             return normalized;
         } catch (error) {
             console.log('추천 코스 호출 실패', error);
-            showUserNotification('코스 추천에 실패했습니다. 네트워크 상태를 확인해주세요.');
+            showUserNotification(error.message || '코스 추천에 실패했습니다. 네트워크 상태를 확인해주세요.');
             // 목업 폴백 없이 빈 배열로 유지해 실제 데이터만 사용
             setRecommendedCourses([]);
             return [];
@@ -188,6 +278,7 @@ export const RunningProvider = ({ children }) => {
             courseName: target.courseName,
             difficultyType: target.difficultyType,
             slopeSummary: target.slopeSummary,
+            averageSlope: target.averageSlope,
         });
         setRecommendedCourseSegments(target.slopeSegments || []);
         setRecommendedCourseSummary(target.slopeSummary || null);
@@ -441,6 +532,59 @@ export const RunningProvider = ({ children }) => {
         return false;
     };
 
+    /**
+     * 저장된 러닝 기록의 제목/메모를 수정한다.
+     * - 기본 지표는 서버/센서에서 수집된 값을 유지한 채 텍스트만 교체한다.
+     */
+    const updateRunRecord = async (recordId, { title, notes }) => {
+        const targetIndex = historyRecords.findIndex((record) => record.id === recordId);
+        if (targetIndex === -1) {
+            showUserNotification('수정할 기록을 찾을 수 없습니다.');
+            return false;
+        }
+
+        const current = historyRecords[targetIndex];
+        const updated = {
+            ...current,
+            title: title?.trim?.() || current.title,
+            notes: notes?.trim?.() || current.notes,
+        };
+
+        const nextRecords = [...historyRecords];
+        nextRecords[targetIndex] = updated;
+
+        const isSaved = await persistHistoryRecords(nextRecords);
+        if (isSaved) {
+            setHistoryRecords(nextRecords);
+            showUserNotification('기록이 업데이트되었습니다.');
+            return true;
+        }
+
+        showUserNotification('기록을 수정하는 중 문제가 발생했습니다.');
+        return false;
+    };
+
+    /**
+     * 선택한 러닝 기록을 완전히 삭제한다.
+     */
+    const deleteRunRecord = async (recordId) => {
+        const filtered = historyRecords.filter((record) => record.id !== recordId);
+        if (filtered.length === historyRecords.length) {
+            showUserNotification('삭제할 기록을 찾을 수 없습니다.');
+            return false;
+        }
+
+        const isSaved = await persistHistoryRecords(filtered);
+        if (isSaved) {
+            setHistoryRecords(filtered);
+            showUserNotification('기록이 삭제되었습니다.');
+            return true;
+        }
+
+        showUserNotification('기록 삭제에 실패했습니다.');
+        return false;
+    };
+
     // ----------------------------------------------------
     // --- 칼로리 샘플 계산 (새 API 필드) ---
     // ----------------------------------------------------
@@ -535,7 +679,8 @@ export const RunningProvider = ({ children }) => {
         historyRecords, userPath, isHistoryLoading, userProfile, caloriesBurned,isProfileLoading, isProfileLoaded,
 
         startRunning, stopRunning,
-        fetchCourseRecommendation, selectRecommendedCourse, resetRunData, updateUserLocation, addRunRecord,
+        fetchCourseRecommendation, selectRecommendedCourse, resetRunData, updateUserLocation,
+        addRunRecord, updateRunRecord, deleteRunRecord,
         loadProfile, saveProfile, sampleCalories,
     };
 
