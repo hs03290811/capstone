@@ -124,36 +124,41 @@ export const RunningProvider = ({ children }) => {
 
     // 💡 실제 백엔드 연동 함수
     // 💡 실제 백엔드 연동 함수 - fetch 버전
-    const fetchCourseRecommendation = async (distance, slope) => {
+    const fetchCourseRecommendation = async (distance) => {
         setIsRecommendationLoading(true);
         setRecommendedCourse(null);
         setRecommendedCourseInfo(null);
 
-        // [TODO] 실제 구현 시 현재 GPS 위치로 대체
-        const currentLat = 37.5665; // 임시: 서울 시청 위도
-        const currentLon = 126.9780; // 임시: 서울 시청 경도
+        // 🔹 위치 없으면 서울시청 기본값 사용
+        let currentLat, currentLon;
+
+        if (
+            lastKnownPosition &&
+            typeof lastKnownPosition.latitude === 'number' &&
+            typeof lastKnownPosition.longitude === 'number'
+        ) {
+            // 러닝 중 마지막으로 추적된 GPS 위치 사용
+            currentLat = lastKnownPosition.latitude;
+            currentLon = lastKnownPosition.longitude;
+            console.log('[GPS] lastKnownPosition 사용:', currentLat, currentLon);
+        } else {
+            // 위치 정보가 없으면 기본값(서울시청) 사용
+            console.log('[GPS] 위치 정보 없음 — 기본값(서울 시청)으로 요청 보냄');
+            currentLat = 37.5665;
+            currentLon = 126.9780;
+        }
 
         try {
-            // FLAT / MODERATE / STEEP → max_slope 숫자로 매핑
-            const SLOPE_TO_MAX = {
-                FLAT: 3,      // 평지 위주
-                MODERATE: 7,  // 보통
-                STEEP: 12,    // 가파른 편
-            };
-            const maxSlope = SLOPE_TO_MAX[slope] ?? 7;
-
-            // 🔹 서버에 보낼 Body(JSON)
+            // 🔥 새 스펙: current_lat, current_lon, target_km 만 보냄
             const requestData = {
                 current_lat: currentLat,
                 current_lon: currentLon,
-                target_km: distance, // 목표 거리
-                max_slope: maxSlope, // 최대 경사도
+                target_km: distance,
             };
 
             console.log('[fetchCourseRecommendation] 요청 URL:', API_URL);
             console.log('[fetchCourseRecommendation] POST body:', requestData);
 
-            // 🔹 axios 대신 fetch 사용
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -176,7 +181,7 @@ export const RunningProvider = ({ children }) => {
             }
 
             // [중요] 백엔드 응답 형식에 맞게 데이터 파싱
-          let rawCourses = [];
+            let rawCourses = [];
 
             // 1) { courses: [...] } 형태인 경우
             if (Array.isArray(rawData?.courses)) {
@@ -230,7 +235,7 @@ export const RunningProvider = ({ children }) => {
                     id: c.id,
                     totalDistanceKm: c.totalDistanceKm,
                     estimatedTimeMinutes: c.estimatedTimeMinutes,
-                }))
+                })),
             );
 
             // ✅ 변환된 코스를 상태에 저장
@@ -248,7 +253,6 @@ export const RunningProvider = ({ children }) => {
                 setVoiceTriggers(initialCourse.voice_triggers || []);
             }
 
-
             console.log('코스 추천 API(fetch) 호출 성공, 상태에 데이터 저장 완료');
 
             // ✅ 성공 여부는 normalizedCourses 기준으로 판단
@@ -265,6 +269,7 @@ export const RunningProvider = ({ children }) => {
             setIsRecommendationLoading(false);
         }
     };
+
 
 
     const selectRecommendedCourse = (courseId) => {
