@@ -6,11 +6,16 @@ import React, {
     useRef,
     useCallback,
 } from 'react';
-import { ToastAndroid } from 'react-native';
+import { ToastAndroid, PermissionsAndroid } from 'react-native';
 import * as geolib from 'geolib';
-import axios from 'axios'; // 💡 Axios 활성화
+import axios from 'axios';
 import courseCandidatesMock from '../assets/mock/recommended_courses.json';
 import initialHistory from '../assets/mock/history.json';
+
+// ✅ 새로 추가한 GPS 모듈
+import Geolocation from 'react-native-geolocation-service';
+
+
 
 // ✅ [중요] 백엔드 주소 + 엔드포인트 분리
 const API_BASE_URL = 'http://54.209.205.37:8000';
@@ -72,6 +77,37 @@ export const RunningProvider = ({ children }) => {
         return `${hours}:${minutes}:${seconds}`;
     };
 
+    
+    // 🔹 위치 권한 요청
+    const requestLocationPermission = async () => {
+        try {
+            const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+            );
+            return granted === PermissionsAndroid.RESULTS.GRANTED;
+        } catch (err) {
+            console.warn('[GPS] 권한 요청 실패:', err);
+            return false;
+        }
+    };
+
+    // 현재 위치를 Promise로 감싼 헬퍼
+    const getCurrentPositionAsync = () =>
+        new Promise((resolve, reject) => {
+            Geolocation.getCurrentPosition(
+            (pos) => resolve(pos),
+            (err) => reject(err),
+            {
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 10000,
+            },
+        );
+    });
+
+
+
+
     // ----------------------------------------------------
     // --- 핵심 함수 (Actions) ---
     // ----------------------------------------------------
@@ -129,27 +165,24 @@ export const RunningProvider = ({ children }) => {
         setRecommendedCourse(null);
         setRecommendedCourseInfo(null);
 
-        // 🔹 위치 없으면 서울시청 기본값 사용
-        let currentLat, currentLon;
+        let currentLat = 37.5665; // 기본값: 서울시청
+        let currentLon = 126.9780;
 
-        if (
-            lastKnownPosition &&
-            typeof lastKnownPosition.latitude === 'number' &&
-            typeof lastKnownPosition.longitude === 'number'
-        ) {
-            // 러닝 중 마지막으로 추적된 GPS 위치 사용
-            currentLat = lastKnownPosition.latitude;
-            currentLon = lastKnownPosition.longitude;
-            console.log('[GPS] lastKnownPosition 사용:', currentLat, currentLon);
-        } else {
-            // 위치 정보가 없으면 기본값(서울시청) 사용
-            console.log('[GPS] 위치 정보 없음 — 기본값(서울 시청)으로 요청 보냄');
-            currentLat = 37.5665;
-            currentLon = 126.9780;
+        try {
+            const granted = await requestLocationPermission();
+            if (granted) {
+                const pos = await getCurrentPositionAsync();
+                currentLat = pos.coords.latitude;
+                currentLon = pos.coords.longitude;
+                console.log('[GPS] 위치 가져옴:', currentLat, currentLon);
+            } else {
+                console.log('[GPS] 권한 거부 → 기본값 사용');
+            }
+        } catch (e) {
+            console.log('[GPS] 위치 가져오기 실패 → 기본값 사용:', e);
         }
 
         try {
-            // 🔥 새 스펙: current_lat, current_lon, target_km 만 보냄
             const requestData = {
                 current_lat: currentLat,
                 current_lon: currentLon,
@@ -159,6 +192,7 @@ export const RunningProvider = ({ children }) => {
             console.log('[fetchCourseRecommendation] 요청 URL:', API_URL);
             console.log('[fetchCourseRecommendation] POST body:', requestData);
 
+            // 이하 기존 fetch/파싱 로직 그대로 유지
             const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
@@ -180,23 +214,18 @@ export const RunningProvider = ({ children }) => {
                 console.log('[fetch] JSON 파싱 실패, 빈 객체로 처리:', e);
             }
 
-            // [중요] 백엔드 응답 형식에 맞게 데이터 파싱
             let rawCourses = [];
 
-            // 1) { courses: [...] } 형태인 경우
             if (Array.isArray(rawData?.courses)) {
                 rawCourses = rawData.courses;
-            // 2) 응답이 이미 배열인 경우: [ {...}, {...} ]
             } else if (Array.isArray(rawData)) {
                 rawCourses = rawData;
-            // 3) 응답이 객체 하나인 경우: { id: 1, ... }
             } else if (rawData && typeof rawData === 'object') {
                 rawCourses = [rawData];
             }
 
             console.log('[fetch] parsed courses length:', rawCourses.length);
 
-            // 🔥 모든 코스를 프론트가 쓰기 좋은 구조로 변환
             const normalizedCourses = rawCourses.map((course, index) => {
                 const coursePath =
                     course.coordinates?.map((coord) => ({
@@ -238,10 +267,8 @@ export const RunningProvider = ({ children }) => {
                 })),
             );
 
-            // ✅ 변환된 코스를 상태에 저장
             setRecommendedCourses(normalizedCourses);
 
-            // ✅ 첫 번째 코스를 기본 선택
             const initialCourse = normalizedCourses[0];
             if (initialCourse) {
                 setRecommendedCourse(initialCourse.coursePath);
@@ -255,11 +282,9 @@ export const RunningProvider = ({ children }) => {
 
             console.log('코스 추천 API(fetch) 호출 성공, 상태에 데이터 저장 완료');
 
-            // ✅ 성공 여부는 normalizedCourses 기준으로 판단
             return normalizedCourses.length > 0;
         } catch (error) {
             console.error('코스 추천 API(fetch) 호출 실패:', error);
-            // 실패 시 상태 초기화
             setRecommendedCourses([]);
             setRecommendedCourse(null);
             setRecommendedCourseInfo(null);
