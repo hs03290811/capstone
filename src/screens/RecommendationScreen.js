@@ -10,36 +10,31 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import Slider from '@react-native-community/slider';
-import SlopeButton from '../components/SlopeButton';
-import { useRunning, SLOPE_TYPES } from '../providers/running_provider';
+import { useRunning } from '../providers/running_provider';
 
 const RecommendationScreen = ({ navigation }) => {
-  const {
-    selectedSlope,
-    selectSlope,
-    fetchCourseRecommendation,
-    isRecommendationLoading,
-  } = useRunning();
+  const { fetchCourseRecommendation, isRecommendationLoading } = useRunning();
 
+  // 사용자가 설정하는 희망 거리 (km)
   const [desiredDistance, setDesiredDistance] = useState(5.0);
 
-  // 🔹 슬라이더 값 변경 핸들러 (빠져 있던 부분)
+  // 🔹 슬라이더 값 변경
   const handleDistanceChange = (value) => {
     const roundedValue = Math.round(value * 10) / 10;
     setDesiredDistance(roundedValue);
   };
 
-  // 🔹 추천 버튼 눌렀을 때
+  // 🔹 추천 버튼 클릭
   const handleRecommendCourse = async () => {
     if (isRecommendationLoading) return;
 
     console.log('[RecommendScreen] 버튼 눌림');
-    const success = await fetchCourseRecommendation(desiredDistance, selectedSlope);
+    const success = await fetchCourseRecommendation(desiredDistance);
     console.log('[RecommendScreen] fetch success:', success);
 
     if (success) {
       console.log('[RecommendScreen] navigating to CourseList...');
-      navigation.navigate('CourseList'); // RootNavigator에 name="CourseList" 인지 확인
+      navigation.navigate('CourseList'); 
     } else {
       console.log('[RecommendScreen] 서버/네트워크 에러로 화면 이동 안 함');
     }
@@ -51,7 +46,7 @@ const RecommendationScreen = ({ navigation }) => {
         style={styles.scrollContainer}
         contentContainerStyle={styles.contentContainer}
       >
-        {/* 1. 총 거리 슬라이더 영역 */}
+        {/* 총 거리 설정 영역 */}
         <View style={styles.settingBlock}>
           <Text style={styles.title}>🏃‍♂️ 희망 총 거리 설정</Text>
 
@@ -71,41 +66,17 @@ const RecommendationScreen = ({ navigation }) => {
             thumbTintColor="#5856D6"
             disabled={isRecommendationLoading}
           />
+
           <Text style={styles.description}>
             슬라이더를 움직여 희망하는 러닝 거리를 설정해주세요.
           </Text>
-        </View>
-
-        {/* 2. 경사도 선택 영역 */}
-        <View style={styles.settingBlock}>
-          <Text style={styles.title}>⛰️ 코스 경사도 선택</Text>
-          <View style={styles.buttonGroup}>
-            <SlopeButton
-              title="완만함 (FLAT)"
-              slopeType={SLOPE_TYPES.FLAT}
-              selectedSlope={selectedSlope}
-              onSelect={selectSlope}
-            />
-            <SlopeButton
-              title="보통 (MODERATE)"
-              slopeType={SLOPE_TYPES.MODERATE}
-              selectedSlope={selectedSlope}
-              onSelect={selectSlope}
-            />
-            <SlopeButton
-              title="가파름 (STEEP)"
-              slopeType={SLOPE_TYPES.STEEP}
-              selectedSlope={selectedSlope}
-              onSelect={selectSlope}
-            />
-          </View>
-          <Text style={styles.description}>
-            선택하신 경사도에 맞춰 최적의 코스를 추천합니다.
+          <Text style={[styles.description, { marginTop: 4 }]}>
+            현재 GPS 위치를 기반으로 다양한 경사도의 코스를 자동으로 추천합니다.
           </Text>
         </View>
       </ScrollView>
 
-      {/* 하단 버튼 및 로딩 스피너 */}
+      {/* 하단 버튼 */}
       <TouchableOpacity
         style={[
           styles.recommendButton,
@@ -145,11 +116,6 @@ const styles = StyleSheet.create({
     color: '#888',
     marginTop: 15,
     textAlign: 'center',
-  },
-  buttonGroup: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginVertical: 10,
   },
   distanceBox: {
     paddingVertical: 15,
