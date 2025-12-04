@@ -134,7 +134,7 @@ def recommend_course(req: GPSRequest):
                 
                 if not path_rows: continue
                 dist_sum = sum([float(r.dist) for r in path_rows]) / 1000.0
-                if not (one_way_target_km * 0.5 <= dist_sum <= one_way_target_km * 1.5): continue 
+                if not (one_way_target_km * 0.8 <= dist_sum <= one_way_target_km * 1.2): continue 
 
                 turn_lat = float(path_rows[-1].elat)
                 turn_lon = float(path_rows[-1].elon)
