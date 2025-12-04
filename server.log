@@ -1,12 +1,25 @@
 nohup: ignoring input
-INFO:     Started server process [105206]
+INFO:     Started server process [105826]
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
 ✅ DB 연결 성공! (Target: segments_table_loose)
 🚀 러닝 앱 서버 시작 (최종 완성)
 📍 요청: 37.5028, 126.9478 / 목표: 1.0km
-🚀 최종 3개 코스 반환 (누적 고도 기준 정렬 / 201.89초)
-INFO:     219.255.207.60:10495 - "POST /api/recommend HTTP/1.1" 200 OK
-INFO:     219.255.207.61:10400 - "GET /docs HTTP/1.1" 200 OK
-INFO:     219.255.207.61:10400 - "GET /openapi.json HTTP/1.1" 200 OK
+🚀 최종 3개 코스 반환 (누적 고도 기준 정렬 / 208.24초)
+INFO:     219.255.207.60:10522 - "POST /api/recommend HTTP/1.1" 200 OK
+📍 요청: 37.505, 126.9536 / 목표: 1.0km
+🚀 최종 3개 코스 반환 (누적 고도 기준 정렬 / 229.92초)
+INFO:     219.255.207.60:10523 - "POST /api/recommend HTTP/1.1" 200 OK
+📍 요청: 37.50294, 126.9568317 / 목표: 1.0km
+🚀 최종 3개 코스 반환 (누적 고도 기준 정렬 / 223.26초)
+INFO:     219.255.207.61:10400 - "POST /api/recommend HTTP/1.1" 200 OK
+📍 요청: 37.50879, 126.9616233 / 목표: 1.0km
+🚀 최종 3개 코스 반환 (누적 고도 기준 정렬 / 215.11초)
+INFO:     219.255.207.61:10400 - "POST /api/recommend HTTP/1.1" 200 OK
+📍 요청: 37.5088183, 126.96167 / 목표: 1.0km
+🚀 최종 3개 코스 반환 (누적 고도 기준 정렬 / 218.37초)
+INFO:     219.255.207.61:10400 - "POST /api/recommend HTTP/1.1" 200 OK
+📍 요청: 37.505, 126.9536 / 목표: 20.0km
+🚀 최종 3개 코스 반환 (누적 고도 기준 정렬 / 176.39초)
+INFO:     219.255.207.60:10524 - "POST /api/recommend HTTP/1.1" 200 OK
