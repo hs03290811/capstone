@@ -1,23 +1,17 @@
-// src/screens/RecommendationScreen.js
-
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, PermissionsAndroid, Platform, ToastAndroid } from 'react-native';
-// 누락된 Slider 컴포넌트 import 추가
 import Slider from '@react-native-community/slider';
 import Geolocation from 'react-native-geolocation-service';
 import { useRunning } from '../providers/running_provider';
 
 const RecommendationScreen = ({ navigation }) => {
-    // useRunning() 훅에서 모든 필요한 변수를 가져옵니다.
     const {
         fetchCourseRecommendation,
         isRecommendationLoading,
     } = useRunning();
 
-    // UI 내부에서 관리할 거리 상태 (슬라이더의 현재 값)
     const [desiredDistance, setDesiredDistance] = useState(5.0);
 
-    // 실제 위치를 한 번 조회해 추천 API에 넘겨주는 헬퍼
     const requestCurrentLocation = async () => {
         try {
             if (Platform.OS === 'android') {
@@ -47,14 +41,9 @@ const RecommendationScreen = ({ navigation }) => {
         }
     };
 
-    // 슬라이더 값이 변경될 때 실행되는 함수
     const handleDistanceChange = (value) => {
         const roundedValue = Math.round(value * 10) / 10;
-        setDesiredDistance(roundedValue); 
-        
-        // setTotalDistanceKm 함수가 Provider에 없다면 주석 처리하거나, 
-        // Provider에 추가해야 합니다.
-        // setTotalDistanceKm(roundedValue); 
+        setDesiredDistance(roundedValue);
     };
     
     const handleRecommendCourse = async () => {
@@ -63,10 +52,7 @@ const RecommendationScreen = ({ navigation }) => {
         const currentLocation = await requestCurrentLocation();
         if (!currentLocation) return;
 
-        // 1. 실제 추천 API 호출 (위치 + 거리)
         await fetchCourseRecommendation(desiredDistance, null, currentLocation);
-
-        // 2. 후보 리스트 화면으로 이동
         navigation.navigate('CourseList');
     };
 
@@ -82,7 +68,7 @@ const RecommendationScreen = ({ navigation }) => {
                         <Text style={styles.distanceValue}>{desiredDistance.toFixed(1)} km</Text>
                     </View>
                     
-                    <Slider // <-- 슬라이더 컴포넌트가 삽입되었습니다.
+                    <Slider
                         style={{ width: '100%', height: 40 }}
                         minimumValue={1}
                         maximumValue={20}
@@ -99,7 +85,6 @@ const RecommendationScreen = ({ navigation }) => {
 
             </ScrollView>
 
-            {/* 하단 버튼 및 로딩 스피너 */}
             <TouchableOpacity
                 style={[styles.recommendButton, isRecommendationLoading && styles.loadingButton]}
                 onPress={handleRecommendCourse}
@@ -115,7 +100,6 @@ const RecommendationScreen = ({ navigation }) => {
     );
 };
 
-// ... (Stylesheets 부분은 쉼표 오류를 해결한 코드를 사용하고 있다고 가정합니다.)
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f9f9f9', },
     scrollContainer: { flex: 1, paddingHorizontal: 20, },
@@ -127,7 +111,6 @@ const styles = StyleSheet.create({
     },
     title: { fontSize: 18, fontWeight: 'bold', marginBottom: 15, color: '#333', },
     description: { fontSize: 14, color: '#888', marginTop: 15, textAlign: 'center', },
-    buttonGroup: { flexDirection: 'row', justifyContent: 'space-between', marginVertical: 10, },
     distanceBox: {
         paddingVertical: 15, backgroundColor: '#f0f0f0', borderRadius: 8,
         alignItems: 'center', justifyContent: 'center', marginBottom: 10,

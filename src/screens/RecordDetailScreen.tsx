@@ -4,7 +4,8 @@ import MapView, { Polyline } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import type { RootStackParamList } from '../navigation/RootNavigator';
-import { SLOPE_COLORS, getBoundingRegion } from '../utils/courseHelpers';
+import { getBoundingRegion } from '../utils/courseHelpers';
+import { buildAltitudeSegments, summarizeAltitude } from '../utils/altitudeHelpers';
 import { useRunning } from '../providers/running_provider';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'RecordDetail'>;
@@ -51,6 +52,8 @@ const RecordDetailScreen: React.FC<Props> = ({ route, navigation }) => {
     { latitude: 37.565, longitude: 126.985 },
   ];
   const region = getBoundingRegion(coordinates);
+  const altitudeSegments = useMemo(() => buildAltitudeSegments(coordinates as any), [coordinates]);
+  const altitudeSummary = useMemo(() => summarizeAltitude(coordinates as any), [coordinates]);
 
   if (!record) {
     return (
@@ -81,29 +84,37 @@ const RecordDetailScreen: React.FC<Props> = ({ route, navigation }) => {
           zoomEnabled={false}
           zoomControlEnabled={false}
         >
-          <Polyline coordinates={coordinates} strokeColor={SLOPE_COLORS.flat} strokeWidth={5} />
+          {altitudeSegments.length > 0 ? (
+            altitudeSegments.map((segment, index) => (
+              <Polyline
+                key={`record-alt-${index}`}
+                coordinates={segment.coordinates}
+                strokeColor={segment.color}
+                strokeWidth={6}
+              />
+            ))
+          ) : (
+            <Polyline coordinates={coordinates} strokeColor="#5856D6" strokeWidth={5} />
+          )}
         </MapView>
       </View>
 
       <View style={styles.row}>
         <Metric label="총 거리" value={`${record.distanceKm.toFixed(1)} km`} />
         <Metric label="시간" value={record.duration} />
-        <Metric label="평지 비율" value={`${record.slopeBreakdown.flat}%`} />
+        <Metric label="칼로리" value={`${record.calories ?? 0} kcal`} />
       </View>
 
       <View style={styles.row}>
         <Metric label="평균 속도" value={`${record.averageSpeed || '0.0'} km/h`} />
         <Metric label="평균 페이스" value={record.averagePace || '--:--'} />
-        <Metric label="칼로리" value={`${record.calories ?? 0} kcal`} />
+        <Metric label="고도 상승" value={`${altitudeSummary.gain.toFixed(1)} m`} />
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.sectionTitle}>경사도 비율</Text>
-        <View style={styles.legendRow}>
-          <Legend color={SLOPE_COLORS.flat} label="평지" value={`${record.slopeBreakdown.flat}%`} />
-          <Legend color={SLOPE_COLORS.moderate} label="중간" value={`${record.slopeBreakdown.moderate}%`} />
-          <Legend color={SLOPE_COLORS.steep} label="가파름" value={`${record.slopeBreakdown.steep}%`} />
-        </View>
+      <View style={styles.row}>
+        <Metric label="고도 하강" value={`${altitudeSummary.loss.toFixed(1)} m`} />
+        <View style={{ flex: 1 }} />
+        <View style={{ flex: 1 }} />
       </View>
 
       <View style={styles.card}>
@@ -120,7 +131,7 @@ const RecordDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
       <View style={styles.buttonRow}>
         <TouchableOpacity style={[styles.actionButton, styles.deleteButton]} onPress={handleDelete}>
-          <Text style={styles.actionText}>삭제</Text>
+          <Text style={[styles.actionText, styles.deleteText]}>삭제</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.actionButton, styles.saveButton]} onPress={handleSave}>
           <Text style={styles.actionText}>저장</Text>
@@ -134,16 +145,6 @@ const Metric = ({ label, value }: { label: string; value: string }) => (
   <View style={styles.metric}>
     <Text style={styles.metricLabel}>{label}</Text>
     <Text style={styles.metricValue}>{value}</Text>
-  </View>
-);
-
-const Legend = ({ color, label, value }: { color: string; label: string; value: string }) => (
-  <View style={styles.legendItem}>
-    <View style={[styles.legendDot, { backgroundColor: color }]} />
-    <View>
-      <Text style={styles.legendLabel}>{label}</Text>
-      <Text style={styles.legendValue}>{value}</Text>
-    </View>
   </View>
 );
 
@@ -201,11 +202,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#333',
   },
-  legendRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  legendItem: { flexDirection: 'row', alignItems: 'center' },
-  legendDot: { width: 14, height: 14, borderRadius: 7, marginRight: 8 },
-  legendLabel: { fontSize: 13, color: '#333' },
-  legendValue: { fontSize: 12, color: '#666' },
   buttonRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   actionButton: {
     flex: 1,
@@ -214,9 +210,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginHorizontal: 4,
   },
-  deleteButton: { backgroundColor: '#FF3B30' },
+  deleteButton: { backgroundColor: '#e5e7eb' },
   saveButton: { backgroundColor: '#5856D6' },
   actionText: { color: '#fff', fontWeight: 'bold' },
+  deleteText: { color: '#333' },
 });
 
 export default RecordDetailScreen;

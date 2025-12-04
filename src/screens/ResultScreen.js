@@ -12,9 +12,12 @@ import {
 } from 'react-native';
 import MapView, { Polyline } from 'react-native-maps';
 import { useNavigation } from '@react-navigation/native';
+import * as geolib from 'geolib';
 
 import { useRunning } from '../providers/running_provider';
 import { getBoundingRegion } from '../utils/courseHelpers';
+import { buildAltitudeSegments, summarizeAltitude, formatRelativeAltitude } from '../utils/altitudeHelpers';
+import { computeCalorieSample, DEFAULT_PROFILE as CALORIE_DEFAULT } from '../utils/calorieCalculator';
 
 const ResultScreen = () => {
     const navigation = useNavigation();
@@ -27,7 +30,7 @@ const ResultScreen = () => {
         userPath,
         resetRunData,
         addRunRecord,
-        caloriesBurned,
+        userProfile,
     } = useRunning();
 
     const timeParts = formattedTime.split(':').map(Number);
@@ -49,14 +52,59 @@ const ResultScreen = () => {
 
     const courseCoordinates = useMemo(() => (userPath && userPath.length ? userPath : []), [userPath]);
     const initialRegion = useMemo(() => getBoundingRegion(courseCoordinates), [courseCoordinates]);
+    const altitudeSegments = useMemo(() => buildAltitudeSegments(courseCoordinates), [courseCoordinates]);
+    const altitudeSummary = useMemo(() => summarizeAltitude(courseCoordinates), [courseCoordinates]);
+    const relativeAltitude = useMemo(() => {
+        if (!courseCoordinates.length) return null;
+        const first = courseCoordinates[0]?.altitude;
+        const last = courseCoordinates[courseCoordinates.length - 1]?.altitude;
+        if (!Number.isFinite(first) || !Number.isFinite(last)) return null;
+        return Number(last) - Number(first);
+    }, [courseCoordinates]);
 
-    // 칼로리 표기를 안전하게 처리 (비정상 값은 0으로 대체)
-    const calories = useMemo(() => {
-        if (!Number.isFinite(caloriesBurned)) {
+    const altitudeAwareCalories = useMemo(() => {
+        const safeWeight = Number.isFinite(userProfile?.weightKg)
+            ? Number(userProfile.weightKg)
+            : CALORIE_DEFAULT.weightKg;
+        const safeIncline = Number.isFinite(userProfile?.inclinePercent)
+            ? Number(userProfile.inclinePercent)
+            : CALORIE_DEFAULT.inclinePercent;
+
+        if (!Number.isFinite(totalSeconds) || totalSeconds <= 0 || !Number.isFinite(totalDistanceKm) || totalDistanceKm <= 0) {
             return 0;
         }
-        return Number(caloriesBurned.toFixed(0));
-    }, [caloriesBurned]);
+
+        let weightedIncline = 0;
+        let totalDistanceMeters = 0;
+
+        courseCoordinates.slice(0, -1).forEach((point, index) => {
+            const next = courseCoordinates[index + 1];
+            const segmentDistance = geolib.getDistance(point, next);
+            if (!Number.isFinite(segmentDistance) || segmentDistance <= 0) return;
+
+            const currentAlt = Number.isFinite(point?.altitude) ? Number(point.altitude) : null;
+            const nextAlt = Number.isFinite(next?.altitude) ? Number(next.altitude) : null;
+            const inclinePercent = currentAlt != null && nextAlt != null
+                ? ((nextAlt - currentAlt) / segmentDistance) * 100
+                : safeIncline;
+
+            weightedIncline += inclinePercent * segmentDistance;
+            totalDistanceMeters += segmentDistance;
+        });
+
+        const averageIncline = totalDistanceMeters > 0 ? weightedIncline / totalDistanceMeters : safeIncline;
+        const speedKmh = totalDistanceKm / (totalSeconds / 3600);
+
+        const estimated = computeCalorieSample({
+            weightKg: safeWeight,
+            speedKmh,
+            inclinePercent: averageIncline,
+            sampleSeconds: totalSeconds,
+        });
+
+        if (!Number.isFinite(estimated)) return 0;
+        return Number(estimated.toFixed(0));
+    }, [courseCoordinates, totalDistanceKm, totalSeconds, userProfile]);
 
     const handleSave = async () => {
         const recordTitle = title.trim() || '러닝 기록';
@@ -70,7 +118,7 @@ const ResultScreen = () => {
             averageSpeed,
             averagePace,
             slopeBreakdown: { flat: 100, moderate: 0, steep: 0 },
-            calories,
+            calories: altitudeAwareCalories,
             path: courseCoordinates,
             notes,
         });
@@ -133,8 +181,12 @@ const ResultScreen = () => {
                 </View>
 
                 <View style={styles.metricsRow}>
-                    <MetricBox label="평균 경사" value={'--'} unit="%" />
-                    <MetricBox label="칼로리" value={calories.toString()} unit="kcal" />
+                    <MetricBox label="칼로리" value={altitudeAwareCalories.toString()} unit="kcal" />
+                </View>
+
+                <View style={styles.metricsRow}>
+                    <MetricBox label="누적 상승" value={altitudeSummary.gain.toFixed(1)} unit="m" />
+                    <MetricBox label="누적 하강" value={altitudeSummary.loss.toFixed(1)} unit="m" />
                 </View>
 
                 <View style={styles.mapCard}>
@@ -148,18 +200,33 @@ const ResultScreen = () => {
                             zoomEnabled={false}
                             zoomControlEnabled={false}
                         >
-                            <Polyline
-                                coordinates={courseCoordinates}
-                                strokeColor="#5856D6"
-                                strokeWidth={6}
-                            />
+                            {altitudeSegments.length > 0
+                                ? altitudeSegments.map((segment, index) => (
+                                    <Polyline
+                                        key={`result-alt-${index}`}
+                                        coordinates={segment.coordinates}
+                                        strokeColor={segment.color}
+                                        strokeWidth={6}
+                                    />
+                                ))
+                                : (
+                                    <Polyline
+                                        coordinates={courseCoordinates}
+                                        strokeColor="#5856D6"
+                                        strokeWidth={6}
+                                    />
+                                )}
                         </MapView>
                     ) : (
                         <View style={styles.mapPlaceholder}>
                             <Text style={styles.placeholderText}>시각화할 경로가 없습니다.</Text>
                         </View>
                     )}
-                    <Text style={styles.mapCaption}>내가 뛴 경로를 색상으로 시각화합니다.</Text>
+                    <Text style={styles.mapCaption}>
+                        {altitudeSegments.length > 0
+                            ? `고도 기준 색상 스펙트럼 (기준 대비 ${formatRelativeAltitude(relativeAltitude)})`
+                            : '내가 뛴 경로를 색상으로 시각화합니다.'}
+                    </Text>
                 </View>
             </ScrollView>
 

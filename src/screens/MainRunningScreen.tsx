@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   PermissionsAndroid,
@@ -6,6 +6,7 @@ import {
   SafeAreaView,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,6 +20,7 @@ import Config from 'react-native-config';
 import { useRunning } from '../providers/running_provider';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { buildSlopeSegments, geoJsonToCoordinates, type ColoredSegment } from '../utils/courseHelpers';
+import { formatRelativeAltitude, summarizeAltitude } from '../utils/altitudeHelpers';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'MainRunning'>;
 
@@ -35,7 +37,7 @@ const VOICE_LANG = Config.TTS_VOICE || 'ko-KR';
 /** 위치 권한 요청 (iOS/Android 분기) */
 async function ensureFineLocation(): Promise<boolean> {
   if (Platform.OS !== 'android') {
-    const auth = await Geolocation.requestAuthorization('whenInUse');
+    const auth = await Geolocation.requestAuthorization('always');
     return auth === 'granted' || auth === 'restricted';
   }
 
@@ -48,6 +50,24 @@ async function ensureFineLocation(): Promise<boolean> {
     }
   );
   return res === PermissionsAndroid.RESULTS.GRANTED;
+}
+
+/** Android 10+ 백그라운드 위치 권한 */
+async function ensureBackgroundLocation(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  const androidVersion = Number(Platform.Version) || 0;
+  if (androidVersion < 29) return true;
+
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.ACCESS_BACKGROUND_LOCATION,
+    {
+      title: '백그라운드 위치 권한 요청',
+      message: '화면이 꺼져도 이동 경로를 기록하기 위해 위치 권한이 필요합니다.',
+      buttonPositive: '허용',
+    }
+  );
+
+  return result === PermissionsAndroid.RESULTS.GRANTED;
 }
 
 const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
@@ -64,6 +84,10 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     updateUserLocation, // ← FE1에서 합의한 인터페이스: 위치 업데이트 전달
   } = useRunning();
 
+  const [relativeAltitude, setRelativeAltitude] = useState<number | null>(null);
+
+  const baselineAltitudeRef = useRef<number | null>(null);
+
   // ▼ MapView/Geo watch 핸들 보관
   const mapRef = useRef<MapView | null>(null);
   const watchIdRef = useRef<number | null>(null);
@@ -78,6 +102,31 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     }
     return buildSlopeSegments(courseCoordinates);
   }, [courseCoordinates, recommendedCourseSegments]);
+
+  const altitudeSummary = useMemo(() => summarizeAltitude(userPath), [userPath]);
+
+  const handleAltitudeSample = useCallback(
+    (altitude?: number | null) => {
+      if (!Number.isFinite(altitude)) return;
+      const numericAltitude = Number(altitude);
+
+      if (baselineAltitudeRef.current == null) {
+        baselineAltitudeRef.current = numericAltitude;
+      }
+
+      if (baselineAltitudeRef.current != null) {
+        setRelativeAltitude(numericAltitude - baselineAltitudeRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!isRunning) {
+      baselineAltitudeRef.current = null;
+      setRelativeAltitude(null);
+    }
+  }, [isRunning]);
 
   /** 지도 초기 영역: 경로가 있으면 첫 포인트 기준, 아니면 서울시청 근처 */
   const initialRegion = useMemo<Region>(() => {
@@ -140,6 +189,13 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
   useEffect(() => {
     let mounted = true;
 
+    if (Platform.OS === 'ios') {
+      Geolocation.setRNConfiguration({
+        skipPermissionRequests: false,
+        authorizationLevel: 'always',
+      });
+    }
+
     // 지도 카메라를 현재 좌표로 이동
     const centerTo = (coords: GeoPosition['coords']) => {
       if (!mounted || !mapRef.current) return;
@@ -162,12 +218,18 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
         return;
       }
 
+      const backgroundGranted = await ensureBackgroundLocation();
+      if (!backgroundGranted) {
+        ToastAndroid?.show?.('백그라운드 위치 권한이 필요합니다.', ToastAndroid.SHORT);
+      }
+
       // 현재 위치 1회 조회 → 지도 센터 + 상태 반영
       Geolocation.getCurrentPosition(
         (position: GeoPosition) => {
-          const { latitude, longitude } = position.coords;
+          const { latitude, longitude, altitude } = position.coords;
+          handleAltitudeSample(altitude);
           centerTo(position.coords);
-          updateUserLocation(latitude, longitude); // ← 팀 합의 API 호출
+          updateUserLocation(latitude, longitude, altitude); // ← 팀 합의 API 호출
         },
         (error) => console.log('getCurrentPosition error', error),
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
@@ -176,9 +238,10 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
       // 지속 관측 시작
       watchIdRef.current = Geolocation.watchPosition(
         (position: GeoPosition) => {
-          const { latitude, longitude } = position.coords;
+          const { latitude, longitude, altitude } = position.coords;
+          handleAltitudeSample(altitude);
           centerTo(position.coords);
-          updateUserLocation(latitude, longitude);
+          updateUserLocation(latitude, longitude, altitude);
         },
         (error) => console.log('watchPosition error', error),
         {
@@ -188,6 +251,11 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
           distanceFilter: 4,
           forceRequestLocation: true,
           showLocationDialog: true,
+          showsBackgroundLocationIndicator: true,
+          foregroundService: {
+            notificationTitle: '러닝 중 위치 추적',
+            notificationText: '기록을 위해 백그라운드에서 위치를 수집합니다.',
+          },
         }
       );
     };
@@ -203,7 +271,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
       }
       Geolocation.stopObserving();
     };
-  }, [updateUserLocation]);
+  }, [handleAltitudeSample, updateUserLocation]);
 
   /** 추천 경로가 바뀌면 화면에 꽉 차게 맞춤 */
   useEffect(() => {
@@ -268,6 +336,14 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
           </View>
         </View>
 
+        <View style={styles.altitudeOverlay}>
+          <Text style={styles.altitudeLabel}>고도 변화</Text>
+          <Text style={styles.altitudeValue}>{formatRelativeAltitude(relativeAltitude)}</Text>
+          <Text style={styles.altitudeDelta}>
+            ↑ {altitudeSummary.gain.toFixed(1)} m / ↓ {altitudeSummary.loss.toFixed(1)} m
+          </Text>
+        </View>
+
         {/* 경로 정보 안내 */}
         <View style={styles.courseInfoBox}>
           <Text style={styles.courseInfoText}>
@@ -324,9 +400,21 @@ const styles = StyleSheet.create({
   },
   label: { fontSize: 14, color: '#666', marginBottom: 5 },
   value: { fontSize: 24, fontWeight: 'bold', color: '#333' },
+  altitudeOverlay: {
+    position: 'absolute',
+    top: 140,
+    left: 20,
+    right: 20,
+    backgroundColor: 'rgba(13, 71, 161, 0.9)',
+    borderRadius: 12,
+    padding: 12,
+  },
+  altitudeLabel: { color: '#BBDEFB', fontSize: 12, marginBottom: 4 },
+  altitudeValue: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
+  altitudeDelta: { color: '#E3F2FD', fontSize: 13, marginTop: 2 },
   courseInfoBox: {
     position: 'absolute',
-    bottom: 120,
+    bottom: 140,
     left: 20,
     right: 20,
     backgroundColor: 'rgba(88, 86, 214, 0.9)',
