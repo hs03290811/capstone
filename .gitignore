@@ -13,3 +13,4 @@ __pycache__/
 *.gpkg
 *.geojson
 seoul_boundary_data/
+merged_dem.tif
