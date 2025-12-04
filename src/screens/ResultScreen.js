@@ -66,9 +66,7 @@ const ResultScreen = () => {
         const safeWeight = Number.isFinite(userProfile?.weightKg)
             ? Number(userProfile.weightKg)
             : CALORIE_DEFAULT.weightKg;
-        const safeIncline = Number.isFinite(userProfile?.inclinePercent)
-            ? Number(userProfile.inclinePercent)
-            : CALORIE_DEFAULT.inclinePercent;
+        const safeIncline = CALORIE_DEFAULT.inclinePercent;
 
         if (!Number.isFinite(totalSeconds) || totalSeconds <= 0 || !Number.isFinite(totalDistanceKm) || totalDistanceKm <= 0) {
             return 0;

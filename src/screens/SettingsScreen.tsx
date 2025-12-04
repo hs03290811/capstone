@@ -101,7 +101,7 @@ const SettingsScreen = () => {
 
     try {
       await AsyncStorage.setItem(STORAGE_KEYS.profile, JSON.stringify(sanitizedProfile));
-      await saveProfile({ weightKg: Number(sanitizedProfile.weight), inclinePercent: 0 });
+      await saveProfile({ weightKg: Number(sanitizedProfile.weight) });
       Alert.alert('저장 완료', '기본 정보가 저장되었습니다.');
     } catch (error) {
       console.error('Save profile error:', error);
