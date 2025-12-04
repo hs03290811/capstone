@@ -26,11 +26,57 @@ export const SLOPE_COLORS: Record<ColoredSegment['slope'], string> = {
   steep: '#FF3B30',
 };
 
+type SmoothSlopeOptions = {
+  windowSize?: number;
+  clampMax?: number;
+};
+
+export function smoothSlopeValues(
+  slopeValues: Array<number | null | undefined>,
+  options: SmoothSlopeOptions = {},
+): Array<number | null> {
+  const { windowSize = 3, clampMax = 20 } = options;
+  const normalizedWindow = Math.max(1, windowSize | 1); // 0 또는 짝수 방지를 위한 보정
+  const half = Math.floor(normalizedWindow / 2);
+
+  const cleaned = slopeValues.map((value) => {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  });
+
+  const median = (values: number[]) => {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    if (sorted.length % 2 === 1) return sorted[mid];
+    return (sorted[mid - 1] + sorted[mid]) / 2;
+  };
+
+  return cleaned.map((value, index) => {
+    const start = Math.max(0, index - half);
+    const end = Math.min(cleaned.length - 1, index + half);
+    const neighbors = cleaned.slice(start, end + 1).filter((v): v is number => v !== null);
+
+    const smoothed = median(neighbors);
+    if (!Number.isFinite(smoothed) && value === null) return null;
+
+    const resolved = Number.isFinite(smoothed) ? smoothed : value;
+    if (!Number.isFinite(resolved)) return null;
+
+    const capped = Math.min(Math.max(resolved, -clampMax), clampMax);
+    return capped;
+  });
+}
+
 // 경사도 수치에 따라 구간 난이도를 분류하는 보조 함수
 export function classifySlope(value?: number | null): ColoredSegment['slope'] {
   if (!Number.isFinite(value)) return 'flat';
-  if (value >= 13) return 'steep';
-  if (value >= 5) return 'moderate';
+
+  // 왕복 코스에서 내리막(-) 구간도 동일한 강도로 표시하기 위해 절댓값을 사용한다.
+  const magnitude = Math.abs(value);
+
+  if (magnitude >= 7) return 'steep';
+  if (magnitude >= 4) return 'moderate';
   return 'flat';
 }
 
@@ -102,9 +148,11 @@ export function buildSlopeSegments(
   if (coordinates.length < 2) return [];
 
   // 좌표 구간별 경사도를 실제 값에 맞춰 색상으로 표시
+  const smoothed = smoothSlopeValues(slopeValues);
+
   return coordinates.slice(0, -1).map((point, index) => {
     const next = coordinates[index + 1];
-    const slopeValue = slopeValues[index];
+    const slopeValue = smoothed[index];
     const slope = classifySlope(slopeValue);
     const distanceMeters = geolib.getDistance(point, next);
 

@@ -16,6 +16,7 @@ import Geolocation from 'react-native-geolocation-service';
 import type { GeoPosition } from 'react-native-geolocation-service';
 import Tts from 'react-native-tts';
 import Config from 'react-native-config';
+import * as geolib from 'geolib';
 
 import { useRunning } from '../providers/running_provider';
 import type { RootStackParamList } from '../navigation/RootNavigator';
@@ -25,6 +26,7 @@ import { formatRelativeAltitude, summarizeAltitude } from '../utils/altitudeHelp
 type Props = NativeStackScreenProps<RootStackParamList, 'MainRunning'>;
 
 type LatLng = { latitude: number; longitude: number };
+type VoiceGuide = { index: number; message: string; coordinate: LatLng };
 
 // ▼ 서버에서 받은 GeoJSON(LineString) 일부만 쓰기 위한 간단 타입
 type LineStringFeature = {
@@ -33,6 +35,7 @@ type LineStringFeature = {
 type Course = { features?: LineStringFeature[] };
 
 const VOICE_LANG = Config.TTS_VOICE || 'ko-KR';
+const MIN_DISTANCE_FOR_GUIDES_METERS = 80; // 출발 직후 도착 안내 방지용 최소 이동 거리
 
 /** 위치 권한 요청 (iOS/Android 분기) */
 async function ensureFineLocation(): Promise<boolean> {
@@ -80,13 +83,16 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     stopRunning,
     recommendedCourse,
     recommendedCourseSegments,
+    recommendedCourseVoiceGuides,
     userPath,
     updateUserLocation, // ← FE1에서 합의한 인터페이스: 위치 업데이트 전달
   } = useRunning();
 
   const [relativeAltitude, setRelativeAltitude] = useState<number | null>(null);
+  const [isMapReady, setIsMapReady] = useState<boolean>(false);
 
   const baselineAltitudeRef = useRef<number | null>(null);
+  const spokenGuideIndicesRef = useRef<Set<number>>(new Set());
 
   // ▼ MapView/Geo watch 핸들 보관
   const mapRef = useRef<MapView | null>(null);
@@ -127,6 +133,10 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
       setRelativeAltitude(null);
     }
   }, [isRunning]);
+
+  useEffect(() => {
+    spokenGuideIndicesRef.current = new Set();
+  }, [recommendedCourseVoiceGuides]);
 
   /** 지도 초기 영역: 경로가 있으면 첫 포인트 기준, 아니면 서울시청 근처 */
   const initialRegion = useMemo<Region>(() => {
@@ -185,9 +195,40 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     announce();
   }, [isRunning]);
 
+  useEffect(() => {
+    if (!isRunning) return;
+    if (!Array.isArray(recommendedCourseVoiceGuides) || recommendedCourseVoiceGuides.length === 0) return;
+    const latestLocation = userPath[userPath.length - 1];
+    if (!latestLocation) return;
+
+    // 출발점과 도착점이 같은 코스에서 곧바로 도착 음성이 나오지 않도록,
+    // 일정 거리 이상 이동한 뒤에만 보이스 가이드를 활성화한다.
+    const traveledDistanceMeters = totalDistanceKm * 1000;
+    if (!Number.isFinite(traveledDistanceMeters) || traveledDistanceMeters < MIN_DISTANCE_FOR_GUIDES_METERS) return;
+
+    const triggerDistance = 30; // meters
+
+    for (const guide of recommendedCourseVoiceGuides as VoiceGuide[]) {
+      if (!guide?.coordinate || spokenGuideIndicesRef.current.has(guide.index)) continue;
+      const distance = geolib.getDistance(latestLocation, guide.coordinate);
+      if (Number.isFinite(distance) && distance <= triggerDistance) {
+        spokenGuideIndicesRef.current.add(guide.index);
+        Tts.stop().catch(() => undefined);
+        Tts.speak(guide.message).catch((error) => console.log('TTS guide error', error));
+      }
+    }
+  }, [isRunning, recommendedCourseVoiceGuides, totalDistanceKm, userPath]);
+
   /** 위치 관측 시작/정리 + 지도 카메라 추적 + Provider로 위치 전달 */
   useEffect(() => {
     let mounted = true;
+
+    // 지도 뷰가 완전히 준비된 후에만 카메라 애니메이션을 시도한다.
+    if (!isMapReady) {
+      return () => {
+        mounted = false;
+      };
+    }
 
     if (Platform.OS === 'ios') {
       Geolocation.setRNConfiguration({
@@ -198,17 +239,21 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
 
     // 지도 카메라를 현재 좌표로 이동
     const centerTo = (coords: GeoPosition['coords']) => {
-      if (!mounted || !mapRef.current) return;
+      if (!mounted || !mapRef.current || !isMapReady) return;
       const { latitude, longitude, heading } = coords;
-      mapRef.current.animateCamera(
-        {
-          center: { latitude, longitude },
-          zoom: 17,
-          heading: heading ?? 0,
-          pitch: 0,
-        },
-        { duration: 500 }
-      );
+      try {
+        mapRef.current.animateCamera(
+          {
+            center: { latitude, longitude },
+            zoom: 17,
+            heading: heading ?? 0,
+            pitch: 0,
+          },
+          { duration: 500 }
+        );
+      } catch (error) {
+        console.log('animateCamera error', error);
+      }
     };
 
     const startWatch = async (): Promise<void> => {
@@ -271,16 +316,22 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
       }
       Geolocation.stopObserving();
     };
-  }, [handleAltitudeSample, updateUserLocation]);
+  }, [handleAltitudeSample, isMapReady, updateUserLocation]);
 
   /** 추천 경로가 바뀌면 화면에 꽉 차게 맞춤 */
   useEffect(() => {
-    if (!mapRef.current || courseCoordinates.length === 0) return;
-    mapRef.current.fitToCoordinates(courseCoordinates, {
-      edgePadding: { top: 80, bottom: 80, left: 40, right: 40 },
-      animated: true,
-    });
-  }, [courseCoordinates]);
+    if (!mapRef.current || courseCoordinates.length === 0 || !isMapReady) return;
+    // native driver 애니메이션이 정리된 뷰에 연결되면서 발생하는 오류를 막기 위해
+    // fitToCoordinates 호출을 비동기 스케줄링 + 비애니메이션으로 처리한다.
+    const timeoutId = setTimeout(() => {
+      mapRef.current?.fitToCoordinates(courseCoordinates, {
+        edgePadding: { top: 80, bottom: 80, left: 40, right: 40 },
+        animated: false,
+      });
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, [courseCoordinates, isMapReady]);
 
   /** 러닝 시작/정지 버튼 핸들러 (메모이즈) */
   const handleRunButton = useCallback(() => {
@@ -314,6 +365,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
           initialRegion={initialRegion}
           showsUserLocation
           showsMyLocationButton
+          onMapReady={() => setIsMapReady(true)}
         >
           {/* 추천 경로 라인 렌더 (경사도에 따라 색상 구분) */}
           {slopeSegments.map((segment, index) => (
@@ -341,13 +393,6 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
           <Text style={styles.altitudeValue}>{formatRelativeAltitude(relativeAltitude)}</Text>
           <Text style={styles.altitudeDelta}>
             ↑ {altitudeSummary.gain.toFixed(1)} m / ↓ {altitudeSummary.loss.toFixed(1)} m
-          </Text>
-        </View>
-
-        {/* 경로 정보 안내 */}
-        <View style={styles.courseInfoBox}>
-          <Text style={styles.courseInfoText}>
-            색상으로 구분된 {slopeSegments.length}개 구간을 따라 러닝을 진행하세요.
           </Text>
         </View>
       </View>
@@ -380,48 +425,40 @@ const styles = StyleSheet.create({
   mapWrapper: { flex: 1 },
   dataOverlay: {
     position: 'absolute',
-    top: 40,
-    left: 20,
-    right: 20,
+    top: 58,
+    left: 16,
+    right: 16,
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   dataCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
-    padding: 15,
-    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.92)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-    width: '48%',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 3,
+    width: '46%',
   },
-  label: { fontSize: 14, color: '#666', marginBottom: 5 },
-  value: { fontSize: 24, fontWeight: 'bold', color: '#333' },
+  label: { fontSize: 12, color: '#666', marginBottom: 4 },
+  value: { fontSize: 20, fontWeight: 'bold', color: '#333' },
   altitudeOverlay: {
     position: 'absolute',
-    top: 140,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(13, 71, 161, 0.9)',
+    top: 132,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(13, 71, 161, 0.92)',
     borderRadius: 12,
-    padding: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
   },
-  altitudeLabel: { color: '#BBDEFB', fontSize: 12, marginBottom: 4 },
-  altitudeValue: { color: '#fff', fontSize: 20, fontWeight: 'bold' },
-  altitudeDelta: { color: '#E3F2FD', fontSize: 13, marginTop: 2 },
-  courseInfoBox: {
-    position: 'absolute',
-    bottom: 140,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(88, 86, 214, 0.9)',
-    borderRadius: 10,
-    padding: 12,
-  },
-  courseInfoText: { color: '#fff', fontSize: 14, textAlign: 'center' },
+  altitudeLabel: { color: '#BBDEFB', fontSize: 11, marginBottom: 4 },
+  altitudeValue: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  altitudeDelta: { color: '#E3F2FD', fontSize: 12, marginTop: 2 },
   controls: {
     padding: 20,
     borderTopWidth: 1,

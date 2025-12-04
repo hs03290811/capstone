@@ -1,10 +1,8 @@
-// src/providers/running_provider.js
-
 import React, { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react';
 import { ToastAndroid } from 'react-native';
 import Config from 'react-native-config';
 import * as geolib from 'geolib'; // 거리 계산 라이브러리
-import { computeCalorieSample as computeCalorieSampleFromUtil } from '../utils/calorieCalculator';
+import { computeCalorieSample } from '../utils/calorieCalculator';
 import {
     buildSlopeSegments,
     coordinatesToGeoJson,
@@ -12,16 +10,15 @@ import {
     normalizeDifficultyType,
     summarizeSegments,
 } from '../utils/courseHelpers';
-
-// 러닝 컨텍스트에서 사용하는 기본 상수 (목업 미사용)
+import MOCK_RECOMMENDATION_PAYLOAD from '../utils/mockRecommendations';
 
 const RunningContext = createContext();
 const HISTORY_STORAGE_KEY = 'running_history_records';
 const USER_PROFILE_STORAGE_KEY = 'running_user_profile';
 const DEFAULT_PROFILE = {
     weightKg: 65,
-    inclinePercent: 0,
 };
+const DEFAULT_INCLINE_PERCENT = 0;
 let inMemoryHistory = null; // AsyncStorage/백엔드가 없는 테스트 환경용 메모리 캐시
 let inMemoryProfile = null; // 프로필도 테스트 환경에서 기억하기 위한 메모리 캐시
 
@@ -37,13 +34,14 @@ export const RunningProvider = ({ children }) => {
     const [recommendedCourseInfo, setRecommendedCourseInfo] = useState(null);
     const [recommendedCourseSegments, setRecommendedCourseSegments] = useState([]); // 지도/목록에서 재사용할 경사 세그먼트
     const [recommendedCourseSummary, setRecommendedCourseSummary] = useState(null); // 경사 합계를 빠르게 불러오기 위한 요약값
+    const [recommendedCourseVoiceGuides, setRecommendedCourseVoiceGuides] = useState([]);
     const [recommendedCourses, setRecommendedCourses] = useState([]);
     const [isRecommendationLoading, setIsRecommendationLoading] = useState(false);
     const [historyRecords, setHistoryRecords] = useState([]); // 백엔드/스토리지 데이터만 사용
     const [isHistoryLoading, setIsHistoryLoading] = useState(false);
     const [isHistorySyncAttempted, setIsHistorySyncAttempted] = useState(false);
     const [userPath, setUserPath] = useState([]);
-    const [userProfile, setUserProfile] = useState(DEFAULT_PROFILE); // 체중·경사만 관리하는 간단한 프로필 상태
+    const [userProfile, setUserProfile] = useState(DEFAULT_PROFILE); // 체중만 관리하는 간단한 프로필 상태
     const [isProfileLoading, setIsProfileLoading] = useState(true); // 프로필 로딩 여부(초기 경고 방지)
     const [isProfileLoaded, setIsProfileLoaded] = useState(false); // 프로필 로드 완료 여부
     const [caloriesBurned, setCaloriesBurned] = useState(0); // 실시간 누적 칼로리 상태
@@ -83,8 +81,10 @@ export const RunningProvider = ({ children }) => {
         }
     };
     
+    const lastKnownPositionRef = useRef(null);
+
     // GPS 위치 수신 및 거리 계산 (FE 1 호출용)
-    const updateUserLocation = (latitude, longitude, altitude = null) => {
+    const updateUserLocation = useCallback((latitude, longitude, altitude = null) => {
         if (!isRunning) return;
 
         const newPosition = { latitude, longitude };
@@ -92,17 +92,20 @@ export const RunningProvider = ({ children }) => {
             newPosition.altitude = Number(altitude);
         }
 
-        if (lastKnownPosition) {
+        const prevPosition = lastKnownPositionRef.current;
+        if (prevPosition) {
             const distanceInMeters = geolib.getDistance(
-                lastKnownPosition,
+                prevPosition,
                 newPosition
             );
             setTotalDistanceMeters(prevDistance => prevDistance + distanceInMeters);
         }
+
+        lastKnownPositionRef.current = newPosition;
         setLastKnownPosition(newPosition);
         setUserPath((prev) => [...prev, newPosition]);
 
-    };
+    }, [isRunning]);
 
     /**
      * 추천 코스 조회 플로우
@@ -115,6 +118,7 @@ export const RunningProvider = ({ children }) => {
         setRecommendedCourseInfo(null);
         setRecommendedCourseSegments([]);
         setRecommendedCourseSummary(null);
+        setRecommendedCourseVoiceGuides([]);
 
         // 백엔드 응답 스펙(GeoJSON FeatureCollection) 전용 파서
         const normalizeCoursePayload = (payload = {}) => {
@@ -127,19 +131,147 @@ export const RunningProvider = ({ children }) => {
                 const slopeValues = Array.isArray(feature?.properties?.slopes)
                     ? feature.properties.slopes
                     : [];
-                const totalDistanceMeters = Number(feature?.properties?.total_distance ?? 0);
+                // 백엔드가 km 단위(예: 1.86)나 m 단위(예: 5200)로 혼재해 내려오는 경우를 모두 처리한다.
+                const rawDistance = Number(feature?.properties?.total_distance ?? 0);
+                const totalDistanceMeters = rawDistance > 0 && rawDistance < 50
+                    ? rawDistance * 1000
+                    : rawDistance;
                 const estimatedTimeMinutes = feature?.properties?.total_time_min;
                 const averageSlope = Number(feature?.properties?.avg_slope);
+                const elevations = Array.isArray(feature?.properties?.elevations)
+                    ? feature.properties.elevations
+                    : [];
+                const voiceGuides = Array.isArray(feature?.properties?.voice_guides)
+                    ? feature.properties.voice_guides
+                    : [];
 
                 return {
                     id: feature?.properties?.label ?? index,
                     courseName: feature?.properties?.label || `추천 코스 ${index + 1}`,
                     coordinates,
                     slopeValues,
+                    elevations,
+                    voiceGuides,
                     totalDistanceMeters,
                     estimatedTimeMinutes,
                     difficultyType: normalizeDifficultyType(feature?.properties?.type),
                     averageSlope,
+                };
+            });
+        };
+
+        const buildCourseEntities = (normalizedCourses = []) => {
+            const entities = (Array.isArray(normalizedCourses) ? normalizedCourses : []).map((item, index) => {
+                const coursePath = coordinatesToGeoJson(item.coordinates);
+                const latLngs = geoJsonToCoordinates(coursePath);
+
+                // 1) 좌표-경사 배열 길이를 맞춰 잘라낸다.
+                const trimmedSlopeValues = Array.isArray(item.slopeValues)
+                    ? item.slopeValues.slice(0, Math.max(0, latLngs.length - 1))
+                    : [];
+
+                const rawSlopeSegments = buildSlopeSegments(latLngs, trimmedSlopeValues);
+                const rawDistanceSum = rawSlopeSegments.reduce((sum, seg) => sum + seg.distanceMeters, 0);
+
+                const resolvedVoiceGuides = (Array.isArray(item.voiceGuides) ? item.voiceGuides : [])
+                    .map((guide) => {
+                        const indexValue = Number(guide?.index);
+                        const message = typeof guide?.message === 'string' ? guide.message.trim() : '';
+                        if (!Number.isFinite(indexValue) || !message) return null;
+                        const coordinate = latLngs?.[indexValue];
+                        if (!coordinate) return null;
+                        return { index: indexValue, message, coordinate };
+                    })
+                    .filter(Boolean);
+
+                // 2) 서버 total_distance와 직선거리 합이 어긋나는 경우 비율로 스케일링
+                const targetDistanceMeters = Number(item.totalDistanceMeters) || rawDistanceSum;
+                const rescaledSegments = rawDistanceSum > 0 && targetDistanceMeters > 0
+                    ? rawSlopeSegments.map((seg) => ({
+                        ...seg,
+                        distanceMeters: (seg.distanceMeters * targetDistanceMeters) / rawDistanceSum,
+                    }))
+                    : rawSlopeSegments;
+
+                // 3) 부동소수점 누적 오차로 합계가 살짝 어긋나면 마지막 세그먼트에 보정값을 반영한다.
+                const scaledDistanceSum = rescaledSegments.reduce((sum, seg) => sum + seg.distanceMeters, 0);
+                const distanceGap = targetDistanceMeters - scaledDistanceSum;
+                const normalizedSlopeSegments = rescaledSegments.map((seg, segIndex) => {
+                    if (segIndex !== rescaledSegments.length - 1) return seg;
+                    const adjusted = Math.max(0, seg.distanceMeters + distanceGap);
+                    return { ...seg, distanceMeters: adjusted };
+                });
+
+                const slopeSummary = summarizeSegments(normalizedSlopeSegments);
+
+                const totalDistanceMeters = targetDistanceMeters || slopeSummary.totalDistanceKm * 1000;
+                const estimatedTimeMinutes =
+                    Number(item.estimatedTimeMinutes) || Math.round((totalDistanceMeters / 1000 / 8) * 60);
+                const averageSlope = Number.isFinite(item.averageSlope)
+                    ? item.averageSlope
+                    : (() => {
+                        // 경사 평균값이 누락된 경우, 각 세그먼트 경사도를 거리 가중 평균으로 계산한다.
+                        const weighted = normalizedSlopeSegments.reduce(
+                            (acc, seg) => {
+                                const slopeValue = Number(seg.slopeValue);
+                                if (!Number.isFinite(slopeValue)) return acc;
+                                return {
+                                    distance: acc.distance + seg.distanceMeters,
+                                    sum: acc.sum + slopeValue * seg.distanceMeters,
+                                };
+                            },
+                            { distance: 0, sum: 0 },
+                        );
+
+                        return weighted.distance > 0 ? weighted.sum / weighted.distance : null;
+                    })();
+
+                return {
+                    id: String(item.id ?? index),
+                    courseName: item.courseName || `추천 코스 ${index + 1}`,
+                    totalDistanceKm: totalDistanceMeters / 1000,
+                    estimatedTimeMinutes,
+                    coursePath,
+                    slopeSegments: normalizedSlopeSegments,
+                    slopeSummary,
+                    voiceGuides: resolvedVoiceGuides,
+                    difficultyType: item.difficultyType ?? normalizeDifficultyType(item?.type),
+                    averageSlope,
+                };
+            });
+
+            // 팀 기준에 맞춰 상대 난이도로 재분류: 평균 경사도가 가장 낮은 코스는 easy, 다음은 normal, 가장 높은 코스는 hard.
+            const difficultyMetric = entities.map((course, idx) => {
+                const averageSlope = Number(course.averageSlope);
+                // 경사 평균이 없을 때는 요약 값으로 대체 (steep 비율을 %처럼 사용)
+                const fallbackSlope = (() => {
+                    const summary = course.slopeSummary;
+                    if (!summary) return null;
+                    const total = (summary.flat || 0) + (summary.moderate || 0) + (summary.steep || 0);
+                    if (total <= 0) return null;
+                    return (summary.steep || 0) / total * 100;
+                })();
+
+                return {
+                    index: idx,
+                    metric: Number.isFinite(averageSlope) ? Math.abs(averageSlope) : Math.abs(fallbackSlope ?? 0),
+                };
+            });
+
+            const sorted = difficultyMetric.slice().sort((a, b) => a.metric - b.metric);
+            const labels = ['easy', 'normal', 'hard'];
+            const assigned = {};
+
+            sorted.forEach((item, position) => {
+                const label = labels[Math.min(position, labels.length - 1)];
+                assigned[item.index] = label;
+            });
+
+            return sorted.map((item) => {
+                const course = entities[item.index];
+                return {
+                    ...course,
+                    difficultyType: assigned[item.index] || course.difficultyType || null,
                 };
             });
         };
@@ -209,73 +341,7 @@ export const RunningProvider = ({ children }) => {
                 throw new Error(composedMessage);
             }
 
-            const normalizedCourses = normalizeCoursePayload(data);
-            const normalized = normalizedCourses.map((item, index) => {
-                const coursePath = coordinatesToGeoJson(item.coordinates);
-                const latLngs = geoJsonToCoordinates(coursePath);
-
-                // 1) 좌표-경사 배열 길이를 맞춰 잘라낸다.
-                const trimmedSlopeValues = Array.isArray(item.slopeValues)
-                    ? item.slopeValues.slice(0, Math.max(0, latLngs.length - 1))
-                    : [];
-
-                const rawSlopeSegments = buildSlopeSegments(latLngs, trimmedSlopeValues);
-                const rawDistanceSum = rawSlopeSegments.reduce((sum, seg) => sum + seg.distanceMeters, 0);
-
-                // 2) 서버 total_distance와 직선거리 합이 어긋나는 경우 비율로 스케일링
-                const targetDistanceMeters = Number(item.totalDistanceMeters) || rawDistanceSum;
-                const rescaledSegments = rawDistanceSum > 0 && targetDistanceMeters > 0
-                    ? rawSlopeSegments.map((seg) => ({
-                        ...seg,
-                        distanceMeters: (seg.distanceMeters * targetDistanceMeters) / rawDistanceSum,
-                    }))
-                    : rawSlopeSegments;
-
-                // 3) 부동소수점 누적 오차로 합계가 살짝 어긋나면 마지막 세그먼트에 보정값을 반영한다.
-                const scaledDistanceSum = rescaledSegments.reduce((sum, seg) => sum + seg.distanceMeters, 0);
-                const distanceGap = targetDistanceMeters - scaledDistanceSum;
-                const normalizedSlopeSegments = rescaledSegments.map((seg, segIndex) => {
-                    if (segIndex !== rescaledSegments.length - 1) return seg;
-                    const adjusted = Math.max(0, seg.distanceMeters + distanceGap);
-                    return { ...seg, distanceMeters: adjusted };
-                });
-
-                const slopeSummary = summarizeSegments(normalizedSlopeSegments);
-
-                const totalDistanceMeters = targetDistanceMeters || slopeSummary.totalDistanceKm * 1000;
-                const estimatedTimeMinutes =
-                    Number(item.estimatedTimeMinutes) || Math.round((totalDistanceMeters / 1000 / 8) * 60);
-                const averageSlope = Number.isFinite(item.averageSlope)
-                    ? item.averageSlope
-                    : (() => {
-                        // 경사 평균값이 누락된 경우, 각 세그먼트 경사도를 거리 가중 평균으로 계산한다.
-                        const weighted = normalizedSlopeSegments.reduce(
-                            (acc, seg) => {
-                                const slopeValue = Number(seg.slopeValue);
-                                if (!Number.isFinite(slopeValue)) return acc;
-                                return {
-                                    distance: acc.distance + seg.distanceMeters,
-                                    sum: acc.sum + slopeValue * seg.distanceMeters,
-                                };
-                            },
-                            { distance: 0, sum: 0 },
-                        );
-
-                        return weighted.distance > 0 ? weighted.sum / weighted.distance : null;
-                    })();
-
-                return {
-                    id: String(item.id ?? index),
-                    courseName: item.courseName || `추천 코스 ${index + 1}`,
-                    totalDistanceKm: totalDistanceMeters / 1000,
-                    estimatedTimeMinutes,
-                    coursePath,
-                    slopeSegments: normalizedSlopeSegments,
-                    slopeSummary,
-                    difficultyType: item.difficultyType ?? normalizeDifficultyType(item?.type),
-                    averageSlope,
-                };
-            });
+            const normalized = buildCourseEntities(normalizeCoursePayload(data));
 
             // 실제 백엔드에서 받은 데이터만 저장하고, 응답이 비었으면 빈 배열을 사용한다.
             setRecommendedCourses(normalized);
@@ -283,7 +349,18 @@ export const RunningProvider = ({ children }) => {
         } catch (error) {
             console.log('추천 코스 호출 실패', error);
             showUserNotification(error.message || '코스 추천에 실패했습니다. 네트워크 상태를 확인해주세요.');
-            // 목업 폴백 없이 빈 배열로 유지해 실제 데이터만 사용
+            // API가 불안정할 때를 대비해 간단한 목업 코스 데이터를 폴백으로 제공한다.
+            try {
+                const mocked = buildCourseEntities(normalizeCoursePayload(MOCK_RECOMMENDATION_PAYLOAD));
+                if (mocked.length > 0) {
+                    setRecommendedCourses(mocked);
+                    showUserNotification('임시 코스를 불러왔습니다. 백엔드 연결이 복구되면 다시 시도해주세요.');
+                    return mocked;
+                }
+            } catch (mockError) {
+                console.log('목업 추천 로드 실패', mockError);
+            }
+
             setRecommendedCourses([]);
             return [];
         } finally {
@@ -305,6 +382,7 @@ export const RunningProvider = ({ children }) => {
         });
         setRecommendedCourseSegments(target.slopeSegments || []);
         setRecommendedCourseSummary(target.slopeSummary || null);
+        setRecommendedCourseVoiceGuides(target.voiceGuides || []);
         return target;
     };
 
@@ -316,17 +394,15 @@ export const RunningProvider = ({ children }) => {
         setRecommendedCourseInfo(null);
         setRecommendedCourseSegments([]);
         setRecommendedCourseSummary(null);
+        setRecommendedCourseVoiceGuides([]);
         setRecommendedCourses([]);
         setLastKnownPosition(null);
         setUserPath([]);
         setCaloriesBurned(0);
     };
 
-    /**
-     * 러닝 기록을 저장하는 간단한 헬퍼 (FE 내 임시 저장용)
-     */
     const showUserNotification = (message) => {
-        // 사용자에게 동기화/저장 실패를 알리는 토스트 (안드로이드 기준)
+        // 사용자에게 간단한 안내를 전달하는 토스트 (안드로이드 기준)
         ToastAndroid?.show?.(message, ToastAndroid.SHORT);
     };
 
@@ -342,8 +418,8 @@ export const RunningProvider = ({ children }) => {
     }, []);
 
     /**
-     * 사용자 프로필(체중/경사) 정보를 단순 로드.
-     * - 성별/나이 등은 더 이상 관리하지 않는다.
+     * 사용자 프로필(체중) 정보를 단순 로드.
+     * - 성별/나이/경사는 더 이상 관리하지 않는다.
      */
     const loadProfile = useCallback(async () => {
         setIsProfileLoading(true);
@@ -359,7 +435,6 @@ export const RunningProvider = ({ children }) => {
                     const parsed = JSON.parse(stored);
                     resolvedProfile = {
                         weightKg: parsed?.weightKg ?? DEFAULT_PROFILE.weightKg,
-                        inclinePercent: parsed?.inclinePercent ?? DEFAULT_PROFILE.inclinePercent,
                     };
                     inMemoryProfile = JSON.stringify(resolvedProfile);
                     shouldNotifyDefault = false;
@@ -375,7 +450,6 @@ export const RunningProvider = ({ children }) => {
                     const parsed = JSON.parse(inMemoryProfile);
                     resolvedProfile = {
                         weightKg: parsed?.weightKg ?? DEFAULT_PROFILE.weightKg,
-                        inclinePercent: parsed?.inclinePercent ?? DEFAULT_PROFILE.inclinePercent,
                     };
                     shouldNotifyDefault = false;
                 }
@@ -386,7 +460,7 @@ export const RunningProvider = ({ children }) => {
 
         setUserProfile(resolvedProfile);
         if (shouldNotifyDefault) {
-            showUserNotification('체중/경사 기본값을 사용합니다.');
+            showUserNotification('체중 기본값을 사용합니다.');
         }
 
         setIsProfileLoaded(true);
@@ -394,17 +468,14 @@ export const RunningProvider = ({ children }) => {
     }, [resolveAsyncStorage]);
 
     /**
-     * 체중/경사 프로필을 저장하고 상태와 캐시에 반영한다.
+     * 체중 프로필을 저장하고 상태와 캐시에 반영한다.
      * - AsyncStorage 저장 → 실패 시 메모리 캐시 폴백.
      */
-    const saveProfile = useCallback(async ({ weightKg, inclinePercent }) => {
+    const saveProfile = useCallback(async ({ weightKg }) => {
         const safeProfile = {
             weightKg: Number.isFinite(Number(weightKg)) && Number(weightKg) > 0
                 ? Number(weightKg)
                 : DEFAULT_PROFILE.weightKg,
-            inclinePercent: Number.isFinite(Number(inclinePercent))
-                ? Number(inclinePercent)
-                : DEFAULT_PROFILE.inclinePercent,
         };
 
         setUserProfile(safeProfile);
@@ -608,37 +679,42 @@ export const RunningProvider = ({ children }) => {
         return false;
     };
 
-    // ----------------------------------------------------
-    // --- 칼로리 샘플 계산 (새 API 필드) ---
-    // ----------------------------------------------------
-
     /**
-     * 샘플 칼로리 계산을 위한 간단한 헬퍼.
-     * 새 API 요구사항에 맞춰 weightKg, speedKmh, inclinePercent, sampleSeconds만 사용한다.
-     */
-    const computeCalorieSample = ({ weightKg, speedKmh, inclinePercent, sampleSeconds }) => {
-        // MET 테이블 기반으로 샘플 칼로리를 계산하는 공용 유틸을 사용해 중복 로직을 줄인다.
-        return computeCalorieSampleFromUtil({ weightKg, speedKmh, inclinePercent, sampleSeconds });
-    };
-
-    /**
-     * 프로필이 없을 때 체중/경사 기본값을 사용하여 샘플 칼로리를 계산한다.
+     * 프로필이 없을 때 체중 기본값을 사용하여 샘플 칼로리를 계산한다.
      */
     const sampleCalories = useCallback(({ speedKmh, sampleSeconds }) => {
         const hasWeight = Number.isFinite(userProfile?.weightKg) && userProfile.weightKg > 0;
-        const hasIncline = Number.isFinite(userProfile?.inclinePercent);
-        const isProfileMissing = !(hasWeight && hasIncline);
+        const isProfileMissing = !hasWeight;
         const usedDefaultProfile = isProfileLoaded && isProfileMissing;
+
+        const targetIncline = (() => {
+            const weighted = recommendedCourseSegments.reduce(
+                (acc, seg) => {
+                    const slopeValue = Number(seg?.slopeValue);
+                    if (!Number.isFinite(slopeValue) || !Number.isFinite(seg?.distanceMeters) || seg.distanceMeters <= 0) {
+                        return acc;
+                    }
+                    return {
+                        distance: acc.distance + seg.distanceMeters,
+                        sum: acc.sum + slopeValue * seg.distanceMeters,
+                    };
+                },
+                { distance: 0, sum: 0 },
+            );
+
+            if (weighted.distance <= 0) return DEFAULT_INCLINE_PERCENT;
+            return weighted.sum / weighted.distance;
+        })();
 
         const payload = {
             weightKg: isProfileMissing ? DEFAULT_PROFILE.weightKg : userProfile.weightKg,
             speedKmh,
-            inclinePercent: isProfileMissing ? DEFAULT_PROFILE.inclinePercent : userProfile.inclinePercent,
+            inclinePercent: targetIncline,
             sampleSeconds,
         };
 
         if (usedDefaultProfile) {
-            showUserNotification('프로필이 없어 체중/경사 기본값을 사용합니다.');
+            showUserNotification('프로필이 없어 체중 기본값을 사용합니다.');
         }
 
         return {
@@ -646,7 +722,7 @@ export const RunningProvider = ({ children }) => {
             usedDefaultProfile,
             isProfileLoading,
         };
-    }, [isProfileLoaded, isProfileLoading, userProfile]);
+    }, [isProfileLoaded, isProfileLoading, recommendedCourseSegments, userProfile]);
 
     // Provider 언마운트 시 타이머가 남지 않도록 정리한다.
     useEffect(() => {
@@ -671,12 +747,33 @@ export const RunningProvider = ({ children }) => {
         const safeWeight = Number.isFinite(userProfile?.weightKg) && userProfile.weightKg > 0
             ? userProfile.weightKg
             : DEFAULT_PROFILE.weightKg;
-        const safeIncline = Number.isFinite(userProfile?.inclinePercent)
-            ? userProfile.inclinePercent
-            : DEFAULT_PROFILE.inclinePercent;
+
+        const averageIncline = (() => {
+            const weighted = userPath.slice(0, -1).reduce(
+                (acc, point, index) => {
+                    const next = userPath[index + 1];
+                    const segmentDistance = geolib.getDistance(point, next);
+                    if (!Number.isFinite(segmentDistance) || segmentDistance <= 0) return acc;
+
+                    const currentAlt = Number.isFinite(point?.altitude) ? Number(point.altitude) : null;
+                    const nextAlt = Number.isFinite(next?.altitude) ? Number(next.altitude) : null;
+                    const inclinePercent = currentAlt != null && nextAlt != null
+                        ? ((nextAlt - currentAlt) / segmentDistance) * 100
+                        : DEFAULT_INCLINE_PERCENT;
+
+                    return {
+                        distance: acc.distance + segmentDistance,
+                        sum: acc.sum + inclinePercent * segmentDistance,
+                    };
+                },
+                { distance: 0, sum: 0 },
+            );
+
+            if (weighted.distance <= 0) return DEFAULT_INCLINE_PERCENT;
+            return weighted.sum / weighted.distance;
+        })();
 
         const speedKmh = (totalDistanceMeters / 1000) / (currentTimeSeconds / 3600);
-
         if (!Number.isFinite(speedKmh) || speedKmh <= 0) {
             setCaloriesBurned(0);
             return;
@@ -685,12 +782,12 @@ export const RunningProvider = ({ children }) => {
         const estimatedCalories = computeCalorieSample({
             weightKg: safeWeight,
             speedKmh,
-            inclinePercent: safeIncline,
+            inclinePercent: averageIncline,
             sampleSeconds: currentTimeSeconds,
         });
 
         setCaloriesBurned(estimatedCalories);
-    }, [currentTimeSeconds, totalDistanceMeters, userProfile]);
+    }, [currentTimeSeconds, totalDistanceMeters, userPath, userProfile]);
 
     // ----------------------------------------------------
     // --- 노출할 값들 (Value) ---
@@ -698,7 +795,7 @@ export const RunningProvider = ({ children }) => {
     const value = {
         isRunning, totalDistanceMeters, totalDistanceKm, formattedTime: formatTime(currentTimeSeconds),
         lastKnownPosition,
-        recommendedCourse, recommendedCourseInfo, recommendedCourseSegments, recommendedCourseSummary, recommendedCourses, isRecommendationLoading,
+        recommendedCourse, recommendedCourseInfo, recommendedCourseSegments, recommendedCourseSummary, recommendedCourseVoiceGuides, recommendedCourses, isRecommendationLoading,
         historyRecords, userPath, isHistoryLoading, userProfile, caloriesBurned,isProfileLoading, isProfileLoaded,
 
         startRunning, stopRunning,

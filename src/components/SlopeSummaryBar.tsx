@@ -1,10 +1,9 @@
-// src/components/SlopeSummaryBar.tsx
-// 추천 코스의 경사도 비율을 한눈에 보여주는 요약 막대 컴포넌트입니다.
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { ColoredSegment } from '../utils/courseHelpers';
 
+// 추천 코스의 경사도 비율을 막대 그래프로 요약해 보여주는 표시줄.
 interface Props {
   segments: ColoredSegment[];
 }
