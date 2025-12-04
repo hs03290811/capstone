@@ -16,7 +16,7 @@ import * as geolib from 'geolib';
 
 import { useRunning } from '../providers/running_provider';
 import { getBoundingRegion } from '../utils/courseHelpers';
-import { buildAltitudeSegments, summarizeAltitude, formatRelativeAltitude } from '../utils/altitudeHelpers';
+import { buildAltitudeSegments, summarizeAltitude } from '../utils/altitudeHelpers';
 import { computeCalorieSample, DEFAULT_PROFILE as CALORIE_DEFAULT } from '../utils/calorieCalculator';
 
 const ResultScreen = () => {
@@ -41,14 +41,17 @@ const ResultScreen = () => {
             ? (totalDistanceKm / (totalSeconds / 3600)).toFixed(1)
             : '0.0';
 
+    const averagePaceSecondsPerKm =
+        totalDistanceKm > 0 && totalSeconds > 0 ? totalSeconds / totalDistanceKm : null;
+
     const averagePace =
-        totalDistanceKm > 0 && totalSeconds > 0
-            ? `${Math.floor(totalSeconds / 60 / totalDistanceKm)
+        averagePaceSecondsPerKm != null
+            ? `${Math.floor(averagePaceSecondsPerKm / 60)}'${Math.floor(averagePaceSecondsPerKm % 60)
                 .toString()
-                .padStart(2, '0')}:${Math.floor((totalSeconds / totalDistanceKm) % 60)
-                .toString()
-                .padStart(2, '0')}`
-            : '--:--';
+                .padStart(2, '0')}"`
+            : `--'--"`;
+
+    const averagePaceWithUnit = `${averagePace}/km`;
 
     const courseCoordinates = useMemo(() => (userPath && userPath.length ? userPath : []), [userPath]);
     const initialRegion = useMemo(() => getBoundingRegion(courseCoordinates), [courseCoordinates]);
@@ -114,7 +117,7 @@ const ResultScreen = () => {
             distanceKm: Number(totalDistanceKm.toFixed(2)),
             duration: formattedTime,
             averageSpeed,
-            averagePace,
+            averagePace: averagePaceWithUnit,
             slopeBreakdown: { flat: 100, moderate: 0, steep: 0 },
             calories: altitudeAwareCalories,
             path: courseCoordinates,
@@ -175,7 +178,7 @@ const ResultScreen = () => {
 
                 <View style={styles.metricsRow}>
                     <MetricBox label="평균 속도" value={averageSpeed} unit="km/h" />
-                    <MetricBox label="평균 페이스" value={averagePace} unit="분/㎞" />
+                    <MetricBox label="평균 페이스" value={averagePace} unit="/km" />
                 </View>
 
                 <View style={styles.metricsRow}>
@@ -220,11 +223,6 @@ const ResultScreen = () => {
                             <Text style={styles.placeholderText}>시각화할 경로가 없습니다.</Text>
                         </View>
                     )}
-                    <Text style={styles.mapCaption}>
-                        {altitudeSegments.length > 0
-                            ? `고도 기준 색상 스펙트럼 (기준 대비 ${formatRelativeAltitude(relativeAltitude)})`
-                            : '내가 뛴 경로를 색상으로 시각화합니다.'}
-                    </Text>
                 </View>
             </ScrollView>
 
@@ -310,7 +308,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#f2f2f2',
     },
     placeholderText: { color: '#666' },
-    mapCaption: { padding: 12, color: '#555', fontSize: 13, textAlign: 'center' },
     actions: { flexDirection: 'row', padding: 16, gap: 10 },
     button: { flex: 1, padding: 16, borderRadius: 12, alignItems: 'center' },
     primaryButton: { backgroundColor: '#4CD964' },

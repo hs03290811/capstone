@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, PermissionsAndroid, Platform, ToastAndroid } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, PermissionsAndroid, Platform, ToastAndroid, Modal } from 'react-native';
 import Slider from '@react-native-community/slider';
 import Geolocation from 'react-native-geolocation-service';
 import { useRunning } from '../providers/running_provider';
@@ -58,6 +58,19 @@ const RecommendationScreen = ({ navigation }) => {
 
     return (
         <View style={styles.container}>
+            <Modal
+                visible={isRecommendationLoading}
+                transparent
+                animationType="fade"
+            >
+                <View style={styles.modalBackdrop}>
+                    <View style={styles.modalContent}>
+                        <ActivityIndicator size="large" color="#5856D6" style={styles.modalSpinner} />
+                        <Text style={styles.modalText}>경로 추천중입니다. 잠시만 기다려주세요.</Text>
+                    </View>
+                </View>
+            </Modal>
+
             <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.contentContainer}>
                 
                 {/* 1. 총 거리 슬라이더 영역 */}
@@ -90,11 +103,7 @@ const RecommendationScreen = ({ navigation }) => {
                 onPress={handleRecommendCourse}
                 disabled={isRecommendationLoading}
             >
-                {isRecommendationLoading ? (
-                    <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                    <Text style={styles.recommendButtonText}>코스 추천받기</Text>
-                )}
+                <Text style={styles.recommendButtonText}>코스 추천받기</Text>
             </TouchableOpacity>
         </View>
     );
@@ -126,6 +135,33 @@ const styles = StyleSheet.create({
         backgroundColor: '#999',
     },
     recommendButtonText: { color: '#fff', fontSize: 18, fontWeight: 'bold', },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalContent: {
+        width: '75%',
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        paddingVertical: 30,
+        paddingHorizontal: 20,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+        elevation: 5,
+    },
+    modalSpinner: {
+        marginBottom: 15,
+    },
+    modalText: {
+        fontSize: 16,
+        color: '#333',
+        textAlign: 'center',
+    },
 });
 
 export default RecommendationScreen;

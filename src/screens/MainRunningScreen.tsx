@@ -10,7 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import MapView, { Polyline, type Region } from 'react-native-maps';
+import MapView, { Marker, Polyline, type Region } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Geolocation from 'react-native-geolocation-service';
 import type { GeoPosition } from 'react-native-geolocation-service';
@@ -93,6 +93,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
 
   const baselineAltitudeRef = useRef<number | null>(null);
   const spokenGuideIndicesRef = useRef<Set<number>>(new Set());
+  const hasPassedReturnPointRef = useRef<boolean>(false);
 
   // ▼ MapView/Geo watch 핸들 보관
   const mapRef = useRef<MapView | null>(null);
@@ -110,6 +111,13 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
   }, [courseCoordinates, recommendedCourseSegments]);
 
   const altitudeSummary = useMemo(() => summarizeAltitude(userPath), [userPath]);
+
+  /** 좌표 배열의 시작 지점을 출발/도착 지점으로 사용한다. */
+  const startPoint = useMemo(() => {
+    if (courseCoordinates.length === 0) return null;
+
+    return courseCoordinates[0];
+  }, [courseCoordinates]);
 
   const handleAltitudeSample = useCallback(
     (altitude?: number | null) => {
@@ -136,7 +144,38 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
 
   useEffect(() => {
     spokenGuideIndicesRef.current = new Set();
+    hasPassedReturnPointRef.current = false;
   }, [recommendedCourseVoiceGuides]);
+
+  const returnPointGuideIndex = useMemo(() => {
+    const guides = Array.isArray(recommendedCourseVoiceGuides)
+      ? (recommendedCourseVoiceGuides as VoiceGuide[])
+      : [];
+    const returnGuide = guides.find((guide) =>
+      typeof guide?.message === 'string' ? guide.message.includes('반환점') : false
+    );
+
+    return Number.isFinite(returnGuide?.index) ? returnGuide?.index ?? null : null;
+  }, [recommendedCourseVoiceGuides]);
+
+  const returnPointDistanceMeters = useMemo(() => {
+    if (returnPointGuideIndex == null) return null;
+    if (!courseCoordinates[returnPointGuideIndex]) return null;
+
+    let accumulated = 0;
+    for (let i = 1; i <= returnPointGuideIndex; i += 1) {
+      const segmentDistance = geolib.getDistance(
+        courseCoordinates[i - 1],
+        courseCoordinates[i]
+      );
+
+      if (Number.isFinite(segmentDistance)) {
+        accumulated += segmentDistance;
+      }
+    }
+
+    return accumulated;
+  }, [courseCoordinates, returnPointGuideIndex]);
 
   /** 지도 초기 영역: 경로가 있으면 첫 포인트 기준, 아니면 서울시청 근처 */
   const initialRegion = useMemo<Region>(() => {
@@ -204,15 +243,52 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     // 출발점과 도착점이 같은 코스에서 곧바로 도착 음성이 나오지 않도록,
     // 일정 거리 이상 이동한 뒤에만 보이스 가이드를 활성화한다.
     const traveledDistanceMeters = totalDistanceKm * 1000;
-    if (!Number.isFinite(traveledDistanceMeters) || traveledDistanceMeters < MIN_DISTANCE_FOR_GUIDES_METERS) return;
+    const hasReachedReturnPointByDistance = Number.isFinite(returnPointDistanceMeters)
+      ? traveledDistanceMeters >= returnPointDistanceMeters
+      : false;
+
+    if (hasReachedReturnPointByDistance) {
+      hasPassedReturnPointRef.current = true;
+    }
+
+    if (
+      !hasPassedReturnPointRef.current &&
+      returnPointGuideIndex == null &&
+      (!Number.isFinite(traveledDistanceMeters) || traveledDistanceMeters < MIN_DISTANCE_FOR_GUIDES_METERS)
+    ) {
+      return;
+    }
 
     const triggerDistance = 30; // meters
 
     for (const guide of recommendedCourseVoiceGuides as VoiceGuide[]) {
       if (!guide?.coordinate || spokenGuideIndicesRef.current.has(guide.index)) continue;
+      const isGuideBeforeReturn =
+        returnPointGuideIndex == null ? true : guide.index <= returnPointGuideIndex;
+
+      if (!hasPassedReturnPointRef.current && returnPointGuideIndex != null && !isGuideBeforeReturn) {
+        continue;
+      }
+
+      if (hasPassedReturnPointRef.current && returnPointGuideIndex != null && isGuideBeforeReturn) {
+        continue;
+      }
+
+      const shouldEnforceMinimumDistance =
+        returnPointGuideIndex == null ? true : hasPassedReturnPointRef.current || !isGuideBeforeReturn;
+
+      if (
+        shouldEnforceMinimumDistance &&
+        (!Number.isFinite(traveledDistanceMeters) || traveledDistanceMeters < MIN_DISTANCE_FOR_GUIDES_METERS)
+      ) {
+        continue;
+      }
       const distance = geolib.getDistance(latestLocation, guide.coordinate);
       if (Number.isFinite(distance) && distance <= triggerDistance) {
         spokenGuideIndicesRef.current.add(guide.index);
+        if (returnPointGuideIndex != null && guide.index === returnPointGuideIndex) {
+          hasPassedReturnPointRef.current = true;
+        }
         Tts.stop().catch(() => undefined);
         Tts.speak(guide.message).catch((error) => console.log('TTS guide error', error));
       }
@@ -373,6 +449,9 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
           ))}
           {userPath.length >= 2 && (
             <Polyline coordinates={userPath} strokeColor="#5856D6" strokeWidth={5} />
+          )}
+          {startPoint && (
+            <Marker coordinate={startPoint} title="출발/도착 지점" pinColor="#4CAF50" />
           )}
         </MapView>
 

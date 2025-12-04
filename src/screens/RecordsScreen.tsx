@@ -40,7 +40,7 @@ const RecordsScreen: React.FC = () => {
         </View>
 
         <View style={styles.row}>
-          <Badge label="평균 페이스" value={item.averagePace || '--:--'} />
+          <Badge label="평균 페이스" value={item.averagePace || "--'--\""} />
           <Badge label="칼로리" value={`${item.calories ?? 0} kcal`} />
           <View style={{ flex: 1 }} />
         </View>

@@ -107,7 +107,7 @@ const RecordDetailScreen: React.FC<Props> = ({ route, navigation }) => {
 
       <View style={styles.row}>
         <Metric label="평균 속도" value={`${record.averageSpeed || '0.0'} km/h`} />
-        <Metric label="평균 페이스" value={record.averagePace || '--:--'} />
+        <Metric label="평균 페이스" value={record.averagePace || "--'--\""} />
         <Metric label="고도 상승" value={`${altitudeSummary.gain.toFixed(1)} m`} />
       </View>
 

@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import MapView, { Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline, type LatLng } from 'react-native-maps';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { useRunning } from '../providers/running_provider';
@@ -72,6 +72,13 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const initialRegion = useMemo(() => getBoundingRegion(coordinates), [coordinates]);
 
+  /** 좌표 배열의 시작 지점을 출발/도착 지점으로 사용한다. */
+  const startPoint = useMemo(() => {
+    if (coordinates.length === 0) return null;
+
+    return coordinates[0];
+  }, [coordinates]);
+
   const handleStart = () => {
     navigation.navigate('MainRunning');
   };
@@ -107,6 +114,9 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
             {segments.map((segment, index) => (
               <Polyline key={`${segment.slope}-${index}`} coordinates={segment.coordinates} strokeColor={segment.color} strokeWidth={6} />
             ))}
+            {startPoint && (
+              <Marker coordinate={startPoint} title="출발/도착 지점" pinColor="#4CAF50" />
+            )}
           </MapView>
         </View>
 
