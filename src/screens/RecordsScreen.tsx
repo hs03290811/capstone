@@ -5,6 +5,7 @@ import type { NavigationProp } from '@react-navigation/native';
 
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { useRunning } from '../providers/running_provider';
+import { summarizeAltitude } from '../utils/altitudeHelpers';
 
 type HistoryItem = {
   id: string;
@@ -16,35 +17,40 @@ type HistoryItem = {
   notes: string;
   averagePace?: string;
   calories?: number;
+  path?: any[];
 };
 
 const RecordsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { historyRecords } = useRunning();
-  const renderItem = ({ item }: { item: HistoryItem }) => (
-    <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('RecordDetail', { recordId: item.id })}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.date}>{item.date}</Text>
-        <Text style={styles.title}>{item.title}</Text>
-      </View>
+  const renderItem = ({ item }: { item: HistoryItem }) => {
+    const altitudeSummary = summarizeAltitude(Array.isArray(item.path) ? (item.path as any) : []);
 
-      <View style={styles.row}>
-        <Badge label="거리" value={`${item.distanceKm.toFixed(1)} km`} />
-        <Badge label="시간" value={item.duration} />
-        <Badge label="경사" value={`평지 ${item.slopeBreakdown.flat}%`} />
-      </View>
+    return (
+      <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('RecordDetail', { recordId: item.id })}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.date}>{item.date}</Text>
+          <Text style={styles.title}>{item.title}</Text>
+        </View>
 
-      <View style={styles.row}>
-        <Badge label="평균 페이스" value={item.averagePace || '--:--'} />
-        <Badge label="칼로리" value={`${item.calories ?? 0} kcal`} />
-        <View style={{ flex: 1 }} />
-      </View>
+        <View style={styles.row}>
+          <Badge label="거리" value={`${item.distanceKm.toFixed(1)} km`} />
+          <Badge label="시간" value={item.duration} />
+          <Badge label="고도 변화" value={`↑ ${altitudeSummary.gain.toFixed(0)}m / ↓ ${altitudeSummary.loss.toFixed(0)}m`} />
+        </View>
 
-      <Text numberOfLines={2} style={styles.notes}>
-        {item.notes}
-      </Text>
-    </TouchableOpacity>
-  );
+        <View style={styles.row}>
+          <Badge label="평균 페이스" value={item.averagePace || '--:--'} />
+          <Badge label="칼로리" value={`${item.calories ?? 0} kcal`} />
+          <View style={{ flex: 1 }} />
+        </View>
+
+        <Text numberOfLines={2} style={styles.notes}>
+          {item.notes}
+        </Text>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>

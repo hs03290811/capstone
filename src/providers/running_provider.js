@@ -84,10 +84,13 @@ export const RunningProvider = ({ children }) => {
     };
     
     // GPS 위치 수신 및 거리 계산 (FE 1 호출용)
-    const updateUserLocation = (latitude, longitude) => {
+    const updateUserLocation = (latitude, longitude, altitude = null) => {
         if (!isRunning) return;
 
         const newPosition = { latitude, longitude };
+        if (Number.isFinite(altitude)) {
+            newPosition.altitude = Number(altitude);
+        }
 
         if (lastKnownPosition) {
             const distanceInMeters = geolib.getDistance(
@@ -144,13 +147,28 @@ export const RunningProvider = ({ children }) => {
         // 유효성 에러 메시지 추출용 헬퍼 (새 API의 detail 배열 대응)
         const extractValidationMessage = (payload = {}) => {
             const details = payload?.detail;
-            if (!Array.isArray(details) || details.length === 0) return null;
 
-            const first = details[0];
-            const locText = Array.isArray(first?.loc) ? first.loc.join(' > ') : '';
-            const msgText = first?.msg || first?.message || '';
+            // FastAPI 기본 형태: detail: [ { loc: [...], msg: '...', type: '...' } ]
+            if (Array.isArray(details) && details.length > 0) {
+                const first = details[0];
+                const locText = Array.isArray(first?.loc) ? first.loc.join(' > ') : '';
+                const msgText = first?.msg || first?.message || '';
+                return [locText, msgText].filter(Boolean).join(': ');
+            }
 
-            return [locText, msgText].filter(Boolean).join(': ');
+            // 문자열 detail만 내려오는 경우도 처리
+            if (typeof details === 'string') return details;
+
+            // 객체 detail에서 msg/message/error 필드 추출
+            if (details && typeof details === 'object') {
+                const locText = Array.isArray(details.loc) ? details.loc.join(' > ') : '';
+                const msgText = details.msg || details.message || details.error;
+                if (msgText) return [locText, msgText].filter(Boolean).join(': ');
+            }
+
+            // 최상위 message/error/detail 문자열도 후보로 사용
+            const candidate = payload?.message || payload?.error || (typeof payload?.detail === 'string' ? payload.detail : null);
+            return typeof candidate === 'string' ? candidate : null;
         };
 
         try {
@@ -182,8 +200,13 @@ export const RunningProvider = ({ children }) => {
 
             if (!response.ok) {
                 const validationMessage = extractValidationMessage(data);
-                const errorMessage = validationMessage || '추천 코스 API 호출에 실패했습니다.';
-                throw new Error(errorMessage);
+                const statusMessage = response.status ? `HTTP ${response.status}` : null;
+                const composedMessage = validationMessage
+                    ? `추천 코스 API 호출에 실패했습니다. (${validationMessage})`
+                    : statusMessage
+                        ? `추천 코스 API 호출에 실패했습니다. (${statusMessage})`
+                        : '추천 코스 API 호출에 실패했습니다.';
+                throw new Error(composedMessage);
             }
 
             const normalizedCourses = normalizeCoursePayload(data);

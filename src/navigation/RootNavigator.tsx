@@ -1,7 +1,7 @@
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 
 import RecommendationScreen from '../screens/RecommendationScreen';
 import MainRunningScreen from '../screens/MainRunningScreen';
@@ -36,8 +36,10 @@ const MainTabsNavigator = () => (
       headerShown: false,
       // 아이콘이 깨져 보이는 문제를 피하기 위해 아이콘을 숨기고 라벨만 노출
       tabBarIcon: () => null,
+      tabBarStyle: styles.tabBar,
+      tabBarItemStyle: styles.tabItem,
       tabBarLabel: ({ focused, children }) => (
-        <Text style={{ color: focused ? '#5856D6' : '#666', fontSize: 12 }}>{children}</Text>
+        <Text style={[styles.tabLabel, focused && styles.tabLabelFocused]}>{children}</Text>
       ),
     }}
   >
@@ -46,6 +48,28 @@ const MainTabsNavigator = () => (
     <Tab.Screen name="Settings" component={SettingsScreen} options={{ title: '설정' }} />
   </Tab.Navigator>
 );
+
+const styles = StyleSheet.create({
+  tabBar: {
+    height: 70,
+    paddingTop: 8,
+    paddingBottom: 14,
+    backgroundColor: '#fff',
+  },
+  tabItem: {
+    paddingVertical: 2,
+  },
+  tabLabel: {
+    color: '#444',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  tabLabelFocused: {
+    color: '#5856D6',
+    fontWeight: '800',
+  },
+});
 
 const RootNavigator = () => {
   return (
