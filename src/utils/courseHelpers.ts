@@ -187,9 +187,11 @@ export function normalizeDifficultyType(raw?: string | null): DifficultyType | n
 
   const lower = raw.toString().trim().toLowerCase();
 
-  if (['hard', '도전', '어려움', '고난도'].includes(lower)) return 'hard';
-  if (['normal', '보통', '중간'].includes(lower)) return 'normal';
-  if (['easy', '완만', '쉬움'].includes(lower)) return 'easy';
+  const contains = (keyword: string) => lower.includes(keyword);
+
+  if (['hard', '도전', '어려움', '고난도'].some((keyword) => lower === keyword || contains(keyword))) return 'hard';
+  if (['normal', '보통', '중간'].some((keyword) => lower === keyword || contains(keyword))) return 'normal';
+  if (['easy', '완만', '쉬움'].some((keyword) => lower === keyword || contains(keyword))) return 'easy';
 
   return null;
 }

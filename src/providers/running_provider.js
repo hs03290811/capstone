@@ -125,6 +125,11 @@ export const RunningProvider = ({ children }) => {
             if (payload?.type !== 'FeatureCollection' || !Array.isArray(payload.features)) return [];
 
             return payload.features.map((feature, index) => {
+                const difficultyRaw = feature?.properties?.difficulty_type
+                    ?? feature?.properties?.difficultyType
+                    ?? feature?.properties?.difficulty
+                    ?? feature?.properties?.type
+                    ?? feature?.properties?.label;
                 const coordinates = Array.isArray(feature?.geometry?.coordinates)
                     ? feature.geometry.coordinates
                     : [];
@@ -154,7 +159,7 @@ export const RunningProvider = ({ children }) => {
                     voiceGuides,
                     totalDistanceMeters,
                     estimatedTimeMinutes,
-                    difficultyType: normalizeDifficultyType(feature?.properties?.type),
+                    difficultyType: normalizeDifficultyType(difficultyRaw),
                     averageSlope,
                 };
             });
@@ -240,40 +245,11 @@ export const RunningProvider = ({ children }) => {
                 };
             });
 
-            // 팀 기준에 맞춰 상대 난이도로 재분류: 평균 경사도가 가장 낮은 코스는 easy, 다음은 normal, 가장 높은 코스는 hard.
-            const difficultyMetric = entities.map((course, idx) => {
-                const averageSlope = Number(course.averageSlope);
-                // 경사 평균이 없을 때는 요약 값으로 대체 (steep 비율을 %처럼 사용)
-                const fallbackSlope = (() => {
-                    const summary = course.slopeSummary;
-                    if (!summary) return null;
-                    const total = (summary.flat || 0) + (summary.moderate || 0) + (summary.steep || 0);
-                    if (total <= 0) return null;
-                    return (summary.steep || 0) / total * 100;
-                })();
-
-                return {
-                    index: idx,
-                    metric: Number.isFinite(averageSlope) ? Math.abs(averageSlope) : Math.abs(fallbackSlope ?? 0),
-                };
-            });
-
-            const sorted = difficultyMetric.slice().sort((a, b) => a.metric - b.metric);
-            const labels = ['easy', 'normal', 'hard'];
-            const assigned = {};
-
-            sorted.forEach((item, position) => {
-                const label = labels[Math.min(position, labels.length - 1)];
-                assigned[item.index] = label;
-            });
-
-            return sorted.map((item) => {
-                const course = entities[item.index];
-                return {
-                    ...course,
-                    difficultyType: assigned[item.index] || course.difficultyType || null,
-                };
-            });
+            // 백엔드에서 내려준 난이도 정보를 그대로 사용한다.
+            return entities.map((course) => ({
+                ...course,
+                difficultyType: course.difficultyType ?? null,
+            }));
         };
 
         // 유효성 에러 메시지 추출용 헬퍼 (새 API의 detail 배열 대응)

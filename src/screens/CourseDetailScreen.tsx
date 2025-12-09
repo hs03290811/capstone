@@ -49,6 +49,14 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
     [recommendedCourseSummary, segments],
   );
 
+  const difficultyLabel = useMemo(() => {
+    if (recommendedCourseInfo?.difficultyType) {
+      return buildDifficultyLabel({ difficultyType: recommendedCourseInfo.difficultyType });
+    }
+
+    return buildDifficultyLabel({ slopeSummary: stats });
+  }, [recommendedCourseInfo?.difficultyType, stats]);
+
   const averageSlopeValue = useMemo(() => {
     if (Number.isFinite(recommendedCourseInfo?.averageSlope)) {
       return Number(recommendedCourseInfo?.averageSlope);
@@ -123,10 +131,7 @@ const CourseDetailScreen: React.FC<Props> = ({ navigation, route }) => {
         <View style={styles.statRow}>
           <InfoBlock label="총 거리" value={`${(recommendedCourseInfo?.totalDistanceKm ?? stats.totalDistanceKm).toFixed(1)} km`} />
           <InfoBlock label="예상 시간" value={`${recommendedCourseInfo?.estimatedTimeMinutes ?? 30} 분`} />
-          <InfoBlock
-            label="난이도"
-            value={buildDifficultyLabel({ difficultyType: recommendedCourseInfo?.difficultyType, slopeSummary: stats })}
-          />
+          <InfoBlock label="난이도" value={difficultyLabel} />
           <InfoBlock
             label="평균 경사도"
             value={
