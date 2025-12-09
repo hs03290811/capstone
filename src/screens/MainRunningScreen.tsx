@@ -35,7 +35,6 @@ type LineStringFeature = {
 type Course = { features?: LineStringFeature[] };
 
 const VOICE_LANG = Config.TTS_VOICE || 'ko-KR';
-const MIN_DISTANCE_FOR_GUIDES_METERS = 80; // 출발 직후 도착 안내 방지용 최소 이동 거리
 
 /** 위치 권한 요청 (iOS/Android 분기) */
 async function ensureFineLocation(): Promise<boolean> {
@@ -93,7 +92,6 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
 
   const baselineAltitudeRef = useRef<number | null>(null);
   const spokenGuideIndicesRef = useRef<Set<number>>(new Set());
-  const hasPassedReturnPointRef = useRef<boolean>(false);
 
   // ▼ MapView/Geo watch 핸들 보관
   const mapRef = useRef<MapView | null>(null);
@@ -144,38 +142,7 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
 
   useEffect(() => {
     spokenGuideIndicesRef.current = new Set();
-    hasPassedReturnPointRef.current = false;
   }, [recommendedCourseVoiceGuides]);
-
-  const returnPointGuideIndex = useMemo(() => {
-    const guides = Array.isArray(recommendedCourseVoiceGuides)
-      ? (recommendedCourseVoiceGuides as VoiceGuide[])
-      : [];
-    const returnGuide = guides.find((guide) =>
-      typeof guide?.message === 'string' ? guide.message.includes('반환점') : false
-    );
-
-    return Number.isFinite(returnGuide?.index) ? returnGuide?.index ?? null : null;
-  }, [recommendedCourseVoiceGuides]);
-
-  const returnPointDistanceMeters = useMemo(() => {
-    if (returnPointGuideIndex == null) return null;
-    if (!courseCoordinates[returnPointGuideIndex]) return null;
-
-    let accumulated = 0;
-    for (let i = 1; i <= returnPointGuideIndex; i += 1) {
-      const segmentDistance = geolib.getDistance(
-        courseCoordinates[i - 1],
-        courseCoordinates[i]
-      );
-
-      if (Number.isFinite(segmentDistance)) {
-        accumulated += segmentDistance;
-      }
-    }
-
-    return accumulated;
-  }, [courseCoordinates, returnPointGuideIndex]);
 
   /** 지도 초기 영역: 경로가 있으면 첫 포인트 기준, 아니면 서울시청 근처 */
   const initialRegion = useMemo<Region>(() => {
@@ -240,60 +207,23 @@ const MainRunningScreen: React.FC<Props> = ({ navigation }) => {
     const latestLocation = userPath[userPath.length - 1];
     if (!latestLocation) return;
 
-    // 출발점과 도착점이 같은 코스에서 곧바로 도착 음성이 나오지 않도록,
-    // 일정 거리 이상 이동한 뒤에만 보이스 가이드를 활성화한다.
-    const traveledDistanceMeters = totalDistanceKm * 1000;
-    const hasReachedReturnPointByDistance = Number.isFinite(returnPointDistanceMeters)
-      ? traveledDistanceMeters >= returnPointDistanceMeters
-      : false;
-
-    if (hasReachedReturnPointByDistance) {
-      hasPassedReturnPointRef.current = true;
-    }
-
-    if (
-      !hasPassedReturnPointRef.current &&
-      returnPointGuideIndex == null &&
-      (!Number.isFinite(traveledDistanceMeters) || traveledDistanceMeters < MIN_DISTANCE_FOR_GUIDES_METERS)
-    ) {
-      return;
-    }
-
+    const guides = (recommendedCourseVoiceGuides as VoiceGuide[]).slice().sort((a, b) => a.index - b.index);
     const triggerDistance = 30; // meters
 
-    for (const guide of recommendedCourseVoiceGuides as VoiceGuide[]) {
-      if (!guide?.coordinate || spokenGuideIndicesRef.current.has(guide.index)) continue;
-      const isGuideBeforeReturn =
-        returnPointGuideIndex == null ? true : guide.index <= returnPointGuideIndex;
+    const speakGuide = (guide: VoiceGuide) => {
+      spokenGuideIndicesRef.current.add(guide.index);
+      Tts.stop().catch(() => undefined);
+      Tts.speak(guide.message).catch((error) => console.log('TTS guide error', error));
+    };
 
-      if (!hasPassedReturnPointRef.current && returnPointGuideIndex != null && !isGuideBeforeReturn) {
-        continue;
-      }
+    const nextGuide = guides.find((guide) => !spokenGuideIndicesRef.current.has(guide.index));
+    if (!nextGuide?.coordinate) return;
 
-      if (hasPassedReturnPointRef.current && returnPointGuideIndex != null && isGuideBeforeReturn) {
-        continue;
-      }
-
-      const shouldEnforceMinimumDistance =
-        returnPointGuideIndex == null ? true : hasPassedReturnPointRef.current || !isGuideBeforeReturn;
-
-      if (
-        shouldEnforceMinimumDistance &&
-        (!Number.isFinite(traveledDistanceMeters) || traveledDistanceMeters < MIN_DISTANCE_FOR_GUIDES_METERS)
-      ) {
-        continue;
-      }
-      const distance = geolib.getDistance(latestLocation, guide.coordinate);
-      if (Number.isFinite(distance) && distance <= triggerDistance) {
-        spokenGuideIndicesRef.current.add(guide.index);
-        if (returnPointGuideIndex != null && guide.index === returnPointGuideIndex) {
-          hasPassedReturnPointRef.current = true;
-        }
-        Tts.stop().catch(() => undefined);
-        Tts.speak(guide.message).catch((error) => console.log('TTS guide error', error));
-      }
+    const distance = geolib.getDistance(latestLocation, nextGuide.coordinate);
+    if (Number.isFinite(distance) && distance <= triggerDistance) {
+      speakGuide(nextGuide);
     }
-  }, [isRunning, recommendedCourseVoiceGuides, totalDistanceKm, userPath]);
+  }, [isRunning, recommendedCourseVoiceGuides, userPath]);
 
   /** 위치 관측 시작/정리 + 지도 카메라 추적 + Provider로 위치 전달 */
   useEffect(() => {
