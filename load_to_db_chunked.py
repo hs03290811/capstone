@@ -22,8 +22,6 @@ DB_NAME = os.environ.get("DB_NAME")
 # DB_URL 조합
 if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
     print("오류: DB_USER, DB_PASSWORD, DB_HOST, DB_NAME 환경 변수를 설정해야 합니다.")
-    # (로컬 테스트를 위해 기존 값 fallback - 이 부분은 Git에 올리기 전에 지우는 게 좋음)
-    # DB_URL = "postgresql://postgres:REDACTED@capstone-db.caty68mm025l.us-east-1.rds.amazonaws.com:5432/postgres"
     exit(1) # 환경 변수가 없으면 스크립트 중단
 
 DB_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"

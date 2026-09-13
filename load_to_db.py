@@ -1,7 +1,10 @@
 import os
 import geopandas as gpd
 from sqlalchemy import create_engine
+from dotenv import load_dotenv
 import time
+
+load_dotenv()  # .env에서 DB 접속 정보를 읽는다 (.env는 커밋 금지)
 
 # --- 1. 기본 설정 (사용자 경로에 맞게 수정됨) ---
 
@@ -9,9 +12,16 @@ import time
 BASE_DIR = "/Users/peachee/Desktop/CAU/capstone/source"
 SAVED_FILE_PATH = os.path.join(BASE_DIR, "processed_segments.gpkg")
 
-# (수정 2) DB_URL을 Homebrew 기본 설정(사용자명 peachee, 비번 없음)으로 변경
-# 'postgres:password'는 기본값이 아닙니다.
-DB_URL = "postgresql://postgres:REDACTED@capstone-db.caty68mm025l.us-east-1.rds.amazonaws.com:5432/postgres"
+# DB 접속 정보는 환경 변수에서 읽는다 (자격증명을 코드에 넣지 않는다)
+DB_USER = os.environ.get("DB_USER")
+DB_PASSWORD = os.environ.get("DB_PASSWORD")
+DB_HOST = os.environ.get("DB_HOST")
+DB_PORT = os.environ.get("DB_PORT", 5432)
+DB_NAME = os.environ.get("DB_NAME")
+if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
+    print("오류: DB_USER, DB_PASSWORD, DB_HOST, DB_NAME 환경 변수를 설정하세요.")
+    exit(1)
+DB_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 DB_TABLE_NAME = "segments_table"
 
 print(f"'{SAVED_FILE_PATH}'에서 처리된 데이터 로드 중...")
@@ -50,7 +60,7 @@ try:
 
 except Exception as e:
     print(f"데이터베이스 연결 또는 적재 오류: {e}")
-    print(f"DB_URL이 올바른지 확인하세요: {DB_URL}")
+    print(f"DB_HOST 접속 정보를 확인하세요: {DB_HOST}")
     print("PostgreSQL 서버가 실행 중인지 확인하세요 (brew services start postgresql@17)")
 
 print("모든 작업 완료.")

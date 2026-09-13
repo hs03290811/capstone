@@ -34,8 +34,8 @@ code 폴더에 .env라는 이름의 '새 파일'을 만드세요. (.gitignore에
 .env 파일 예시:
 
 DB_USER="postgres"
-DB_PASSWORD="REDACTED"
-DB_HOST="capstone-db.caty68mm025l.us-east-1.rds.amazonaws.com"
+DB_PASSWORD="YOUR_DB_PASSWORD"
+DB_HOST="YOUR_DB_HOST"
 DB_PORT="5432"
 DB_NAME="postgres"
 
@@ -51,8 +51,8 @@ source venv/bin/activate
 
 # 2. (★필수★) 환경 변수 주입
 export DB_USER="postgres"
-export DB_PASSWORD="REDACTED"
-export DB_HOST="capstone-db.caty68mm025l.us-east-1.rds.amazonaws.com"
+export DB_PASSWORD="YOUR_DB_PASSWORD"
+export DB_HOST="YOUR_DB_HOST"
 export DB_PORT="5432"
 export DB_NAME="postgres"
 

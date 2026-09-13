@@ -21,8 +21,6 @@ DB_TABLE_NAME = "segments_table" # (이건 Git에 있어도 됨)
 # DB_URL 조합
 if not all([DB_USER, DB_PASSWORD, DB_HOST, DB_NAME]):
     print("경고: DB 환경 변수가 설정되지 않았습니다. API가 DB에 연결되지 않을 수 있습니다.")
-    # (로컬 테스트를 위해 기존 값 fallback - 이 부분은 Git에 올리기 전에 지우는 게 좋음)
-    # DB_URL = "postgresql://postgres:REDACTED@capstone-db.caty68mm025l.us-east-1.rds.amazonaws.com:5432/postgres"
     DB_URL = None # 환경 변수가 없으면 DB 연결 안 함
 else:
     DB_URL = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
