@@ -1,4 +1,5 @@
 import uvicorn
+import logging
 from fastapi import FastAPI, HTTPException
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import OperationalError
@@ -46,6 +47,7 @@ except Exception as e:
 
 # FastAPI 앱(서버) 생성
 app = FastAPI()
+logger = logging.getLogger("uvicorn.error")
 
 # ... (파일의 나머지 부분은 동일) ...
 # (@app.get("/health") ...)
@@ -108,8 +110,9 @@ def test_db_connection():
             return {"data": data}
 
     except Exception as e:
-        # (예: 'segments_table'이 아직 없는 경우)
-        raise HTTPException(status_code=500, detail=f"DB 조회 오류: {e}")
+        # 실제 오류는 서버 로그에만 남기고, 클라이언트에는 일반 메시지만 반환 (정보 노출 방지)
+        logger.exception("test_db 조회 오류")
+        raise HTTPException(status_code=500, detail="데이터 조회 중 오류가 발생했습니다.")
 
 # --- 3. (진짜 API) 지도 BBOX(사각형) 안의 세그먼트 조회 ---
 @app.get("/segments_in_view")
@@ -168,8 +171,8 @@ def get_segments_in_view(
         return {"data": data_list, "count": len(data_list)}
 
     except Exception as e:
-        print(f"BBOX 쿼리 오류: {e}")
-        raise HTTPException(status_code=500, detail=f"BBOX 쿼리 오류: {e}")
+        logger.exception("segments_in_view 쿼리 오류")
+        raise HTTPException(status_code=500, detail="세그먼트 조회 중 오류가 발생했습니다.")
 
 
 # --- 4. (필수) 서버 실행 ---
